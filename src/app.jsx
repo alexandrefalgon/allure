@@ -54,6 +54,18 @@ const DEFAULT_PROFILE = {
    Ven  (repos)
    Sam  Sortie longue (vélo) + Rappel haut du corps
    Dim  Natation */
+const PACE_RE = /(\d+)'(\d{2})\/(km|100 m)/g;
+const hasPace = (t) => /(\d+)'(\d{2})\/(km|100 m)/.test(t || '');
+// décale toutes les allures d'un texte (5'05/km, 1'45/100 m) de n secondes
+const shiftPaces = (text, n) => String(text || '').replace(PACE_RE, (m, mi, se, u) => { const t = Math.max(60, Number(mi) * 60 + Number(se) + n); return Math.floor(t / 60) + "'" + pad(t % 60) + '/' + u; });
+// remplace la durée en tête de l'objectif ("55 min · ...", "1h15 ...") ou l'ajoute
+const setLeadingDuration = (target, minutes) => { const d = dur(minutes), t = String(target || ''); return /^\s*(\d+h\d{2}|\d+h|\d+\s*min)/.test(t) ? t.replace(/^\s*(\d+h\d{2}|\d+h|\d+\s*min)/, d) : (t ? d + ' · ' + t : d); };
+const applyDelta = (x, d) => {
+  let desc = x.desc, target = x.target;
+  if(d.pace) desc = shiftPaces(desc, d.pace);
+  if(d.dur){ const m = parseTargetMinutes(target); if(m) target = setLeadingDuration(target, Math.max(5, m + d.dur)); }
+  return { ...x, desc, target };
+};
 const dur = (m) => m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + pad(m % 60);
 const DELOAD_WEEKS = [3, 7, 11];
 const P_RUN_Q = [
@@ -922,7 +934,7 @@ function RoutesMap({ items, fitKey, onPick }){
   return <div ref={ref} className="bigmap" role="application" aria-label="Carte de tous les parcours, zoomable" />;
 }
 
-function MapPage({ icu, conn, todayStr, onSettings }){
+function MyRoutes({ icu, conn, todayStr, onSettings }){
   const [period, setPeriod] = useState(90);
   const [sport, setSport] = useState('all');
   const [tick, setTick] = useState(0);
@@ -961,7 +973,6 @@ function MapPage({ icu, conn, todayStr, onSettings }){
 
   if(!conn) return (
     <div>
-      <Header title="Carte" onSettings={onSettings} />
       <div className="connect"><p>Connecte Intervals.icu pour voir tous tes parcours sur une carte.</p><button className="btn" onClick={onSettings}>Connecter Intervals.icu</button></div>
     </div>
   );
@@ -970,7 +981,6 @@ function MapPage({ icu, conn, todayStr, onSettings }){
   const chip = (v, cur, set, label) => <button key={String(v)} role="tab" aria-selected={cur === v} className={cur === v ? 'on' : ''} onClick={() => set(v)}>{label}</button>;
   return (
     <div>
-      <Header title="Carte" sub={items.length + (items.length > 1 ? ' parcours' : ' parcours')} onSettings={onSettings} />
       <div className="seg three" role="tablist" aria-label="Période">{[[30, '30 jours'], [90, '3 mois'], [180, '6 mois']].map(([v, l]) => chip(v, period, setPeriod, l))}</div>
       <div className="seg three" role="tablist" aria-label="Sport" style={{ marginTop: 0 }}>{[['all', 'Tout'], ['course', 'Course'], ['velo', 'Vélo']].map(([v, l]) => chip(v, sport, setSport, l))}</div>
       <RoutesMap items={items} fitKey={period + ':' + sport + ':' + (items.length > 0)} onPick={setOpenAct} />
@@ -979,6 +989,281 @@ function MapPage({ icu, conn, todayStr, onSettings }){
         {loading ? <em>Chargement des tracés {prog.done}/{prog.total}…</em> : <em>{items.length === 0 ? 'Aucun parcours GPS sur cette période.' : 'Touche un tracé pour ouvrir l\'activité.'}</em>}
       </div>
       {openAct && <ActivityModal act={openAct} conn={conn} onClose={() => setOpenAct(null)} />}
+    </div>
+  );
+}
+
+/* ---------- Créer un itinéraire de course (OpenRouteService → GPX) ---------- */
+const ORS_KEY = 'allure_ors_key_v1', ROUTE_PREFS = 'allure_route_prefs_v1';
+const lsGet = (k) => { try{ return localStorage.getItem(k); }catch(e){ return null; } };
+const lsSet = (k, v) => { try{ localStorage.setItem(k, v); }catch(e){ /* stockage indisponible */ } };
+const RB_DEFAULTS = { mode: 'km', km: '10', min: '60', elev: 'any', quiet: true, pace: '6:30', start: null };
+const loadRb = () => { try{ return { ...RB_DEFAULTS, ...(JSON.parse(lsGet(ROUTE_PREFS)) || {}) }; }catch(e){ return { ...RB_DEFAULTS }; } };
+const paceToSec = (s) => { const m = /^\s*(\d{1,2})\s*[:'.]\s*(\d{1,2})\s*$/.exec(String(s || '')); return m ? Number(m[1]) * 60 + Number(m[2]) : 0; };
+
+const rad = (d) => d * Math.PI / 180;
+const hav = (a, b) => { const dLat = rad(b[0] - a[0]), dLng = rad(b[1] - a[1]), x = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLng / 2) ** 2; return 2 * 6371000 * Math.asin(Math.sqrt(x)); };
+function loopStats(c){
+  let dist = 0;
+  for(let i = 1; i < c.length; i++) dist += hav(c[i - 1], c[i]);
+  const el = c.map(p => p[2]);
+  const sm = el.map((_, i) => { let s = 0, n = 0; for(let k = Math.max(0, i - 2); k <= Math.min(el.length - 1, i + 2); k++){ if(typeof el[k] === 'number'){ s += el[k]; n++; } } return n ? s / n : null; });
+  let up = 0, down = 0;
+  for(let i = 1; i < sm.length; i++){ if(sm[i] == null || sm[i - 1] == null) continue; const d = sm[i] - sm[i - 1]; if(d > 0) up += d; else down -= d; }
+  return { dist, ascent: up, descent: down };
+}
+const xmlEsc = (s) => String(s).replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+function toGpx(name, coords){
+  const pts = coords.map(p => '      <trkpt lat="' + p[0].toFixed(6) + '" lon="' + p[1].toFixed(6) + '">' + (typeof p[2] === 'number' ? '<ele>' + p[2].toFixed(1) + '</ele>' : '') + '</trkpt>').join('\n');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Allure" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>' + xmlEsc(name) + '</name><time>' + new Date().toISOString() + '</time></metadata>\n  <trk>\n    <name>' + xmlEsc(name) + '</name>\n    <trkseg>\n' + pts + '\n    </trkseg>\n  </trk>\n</gpx>\n';
+}
+const gpxFileName = (name) => (String(name).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'itineraire') + '.gpx';
+function downloadGpx(name, xml){
+  const blob = new Blob([xml], { type: 'application/gpx+xml' }), url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = gpxFileName(name); document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+async function shareGpx(name, xml){
+  const file = new File([xml], gpxFileName(name), { type: 'application/gpx+xml' });
+  if(navigator.canShare && navigator.canShare({ files: [file] })){ await navigator.share({ files: [file], title: name }); return true; }
+  return false;
+}
+
+async function orsLoop(key, start, length, seed, quiet){
+  const body = { coordinates: [[start[1], start[0]]], elevation: true, instructions: false, options: { round_trip: { length: Math.round(length), points: 3, seed } } };
+  if(quiet) body.options.profile_params = { weightings: { green: { factor: 0.8 }, quiet: { factor: 0.8 } } };
+  let res;
+  try{ res = await fetch('https://api.openrouteservice.org/v2/directions/foot-walking/geojson', { method: 'POST', headers: { Authorization: key, 'Content-Type': 'application/json', Accept: 'application/geo+json, application/json' }, body: JSON.stringify(body) }); }
+  catch(e){ throw { code: 'net' }; }
+  if(res.status === 401 || res.status === 403) throw { code: 'auth' };
+  if(res.status === 429) throw { code: 'rate' };
+  if(!res.ok){
+    if(quiet && res.status === 400){ const r = await orsLoop(key, start, length, seed, false); r.quietDropped = true; return r; }
+    throw { code: 'http', status: res.status };
+  }
+  const j = await res.json();
+  const f = j && j.features && j.features[0];
+  const raw = f && f.geometry && f.geometry.coordinates;
+  if(!Array.isArray(raw) || raw.length < 2) throw { code: 'empty' };
+  const coords = raw.map(c => [c[1], c[0], typeof c[2] === 'number' ? c[2] : null]);
+  return { coords, ...loopStats(coords), len: length, seed };
+}
+const hillLabel = (r) => { const k = r.ascent / (r.dist / 1000); return k < 6 ? 'Plat' : k < 15 ? 'Légèrement vallonné' : 'Vallonné'; };
+
+async function generateLoops({ key, start, targetM, quiet, elev, onProgress }){
+  const seeds = [1, 2, 3, 4, 5, 6], total = seeds.length * 2;
+  let done = 0, noQuiet = false, dropped = false;
+  const tick = () => { done++; onProgress(Math.min(done, total), total); };
+  const call = async (seed, len) => { const r = await orsLoop(key, start, len, seed, quiet && !noQuiet); if(r.quietDropped){ noQuiet = true; dropped = true; } return r; };
+  const pool = async (jobs) => {
+    const out = []; let i = 0;
+    await Promise.all([0, 1, 2].map(async () => {
+      while(i < jobs.length){
+        const k = i++;
+        try{ out[k] = await jobs[k](); }catch(e){ if(e && (e.code === 'auth' || e.code === 'rate' || e.code === 'net')) throw e; out[k] = null; }
+        tick();
+      }
+    }));
+    return out;
+  };
+  const first = await pool(seeds.map(sd => () => call(sd, targetM)));
+  const second = await pool(first.map((r, k) => async () => {
+    if(!r) return null;
+    const ratio = targetM / r.dist;
+    if(Math.abs(1 - ratio) <= 0.06 || ratio < 0.4 || ratio > 2.5) return r;
+    const r2 = await call(seeds[k], r.len * ratio);
+    return Math.abs(r2.dist - targetM) < Math.abs(r.dist - targetM) ? r2 : r;
+  }));
+  const all = second.filter(Boolean);
+  if(!all.length) throw { code: 'empty' };
+  const uniq = [];
+  all.forEach(r => { if(!uniq.some(u => Math.abs(u.dist - r.dist) < 150 && Math.abs(u.ascent - r.ascent) < 8)) uniq.push(r); });
+  const near = (r) => Math.abs(r.dist - targetM);
+  const within = uniq.filter(r => near(r) / targetM <= 0.1);
+  const cand = within.length >= 2 ? within : [...uniq].sort((a, b) => near(a) - near(b)).slice(0, 4);
+  const perKm = (r) => r.ascent / (r.dist / 1000);
+  if(elev === 'flat') cand.sort((a, b) => perKm(a) - perKm(b));
+  else if(elev === 'hilly') cand.sort((a, b) => perKm(b) - perKm(a));
+  else cand.sort((a, b) => near(a) - near(b));
+  return { routes: cand.slice(0, 3), dropped, farOff: within.length < 2 };
+}
+
+const CAND_COLORS = ['#e8590c', '#1c7ed6', '#2f9e44'];
+function BuilderMap({ start, picking, onPick, routes, sel, onSel, fitKey }){
+  const ref = useRef(null), mapRef = useRef(null), layerRef = useRef(null), fitted = useRef(null);
+  const cb = useRef({}); cb.current = { onPick, onSel, picking };
+  useEffect(() => {
+    if(!window.L || !ref.current) return;
+    const L = window.L;
+    const map = L.map(ref.current, { zoomControl: true, scrollWheelZoom: true }).setView(start || [46.6, 2.5], start ? 14 : 5);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+    layerRef.current = L.layerGroup().addTo(map); mapRef.current = map;
+    map.on('click', (e) => { if(cb.current.picking) cb.current.onPick([e.latlng.lat, e.latlng.lng]); });
+    return () => { map.remove(); mapRef.current = null; };
+  }, []);
+  useEffect(() => {
+    const L = window.L, map = mapRef.current, g = layerRef.current;
+    if(!L || !map || !g) return;
+    g.clearLayers();
+    routes.forEach((r, i) => {
+      const on = i === sel, pts = r.coords.map(p => [p[0], p[1]]);
+      const line = L.polyline(pts, { color: CAND_COLORS[i % 3], weight: on ? 6 : 3, opacity: on ? .95 : .55 }).addTo(g);
+      if(!on) line.on('click', () => cb.current.onSel(i));
+    });
+    if(start) L.circleMarker(start, { radius: 8, color: '#fff', weight: 3, fillColor: '#1a9850', fillOpacity: 1 }).addTo(g);
+    if(routes.length && fitted.current !== fitKey){ fitted.current = fitKey; map.fitBounds(L.latLngBounds(routes.flatMap(r => r.coords.map(p => [p[0], p[1]]))), { padding: [28, 28] }); }
+    else if(!routes.length && start) map.setView(start, Math.max(map.getZoom(), 14));
+  }, [start, routes, sel, fitKey]);
+  return <div ref={ref} className={'rbmap' + (picking ? ' picking' : '')} role="application" aria-label="Carte pour choisir le départ et voir les itinéraires" />;
+}
+
+function RouteBuilder(){
+  const init = useRef(loadRb()).current;
+  const [key, setKey] = useState(() => lsGet(ORS_KEY) || '');
+  const [keyIn, setKeyIn] = useState('');
+  const [p, setP] = useState(init);
+  const [start, setStart] = useState(init.start);
+  const [label, setLabel] = useState(init.startLabel || '');
+  const [picking, setPicking] = useState(false);
+  const [q, setQ] = useState('');
+  const [hits, setHits] = useState([]);
+  const [msg, setMsg] = useState('');
+  const [st, setSt] = useState({ status: 'idle', routes: [], done: 0, total: 12, note: '' });
+  const [sel, setSel] = useState(0);
+  const [fitKey, setFitKey] = useState(0);
+  const set = (k, v) => setP(prev => ({ ...prev, [k]: v }));
+  useEffect(() => { lsSet(ROUTE_PREFS, JSON.stringify({ ...p, start, startLabel: label })); }, [p, start, label]);
+
+  const paceSec = paceToSec(p.pace) || 390;
+  const targetM = p.mode === 'km' ? Number(String(p.km).replace(',', '.')) * 1000 : (Number(p.min) * 60 / paceSec) * 1000;
+  const valid = targetM >= 2000 && targetM <= 60000;
+  const saveKey = () => { const k = keyIn.trim(); if(k.length < 20){ setMsg('Colle la clé complète (une longue suite de caractères).'); return; } lsSet(ORS_KEY, k); setKey(k); setKeyIn(''); setMsg(''); };
+
+  const useMyPosition = () => {
+    setMsg('Recherche de ta position…'); setPicking(false);
+    if(!navigator.geolocation){ setMsg('La localisation n\'est pas disponible. Choisis un point sur la carte.'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setStart([pos.coords.latitude, pos.coords.longitude]); setLabel('Ma position'); setMsg(''); setSt(s => ({ ...s, routes: [] })); },
+      () => setMsg('Position indisponible : autorise la localisation pour ce site, ou choisis un point sur la carte.'),
+      { enableHighAccuracy: true, timeout: 12000 });
+  };
+  const search = async () => {
+    if(!q.trim()) return;
+    setMsg('Recherche…'); setHits([]);
+    try{
+      const res = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=fr&q=' + encodeURIComponent(q.trim()));
+      const j = await res.json();
+      setHits(Array.isArray(j) ? j : []); setMsg(Array.isArray(j) && j.length ? '' : 'Aucun lieu trouvé.');
+    }catch(e){ setMsg('Recherche impossible : vérifie ta connexion.'); }
+  };
+  const pickHit = (h) => { setStart([Number(h.lat), Number(h.lon)]); setLabel(String(h.display_name).split(',').slice(0, 2).join(',')); setHits([]); setQ(''); setSt(s => ({ ...s, routes: [] })); };
+  const pickOnMap = (pt) => { setStart(pt); setLabel('Point choisi sur la carte'); setPicking(false); setSt(s => ({ ...s, routes: [] })); };
+
+  const generate = async () => {
+    if(!start){ setMsg('Choisis d\'abord un départ.'); return; }
+    if(!valid){ setMsg('Choisis une distance entre 2 et 60 km (ou une durée équivalente).'); return; }
+    setMsg(''); setSel(0); setSt({ status: 'loading', routes: [], done: 0, total: 12, note: '' });
+    try{
+      const r = await generateLoops({ key, start, targetM, quiet: p.quiet, elev: p.elev, onProgress: (d, t) => setSt(s => ({ ...s, done: d, total: t })) });
+      setSt({ status: 'done', routes: r.routes, done: 12, total: 12, note: (r.dropped ? 'L\'option parcs et rues calmes n\'a pas pu être appliquée. ' : '') + (r.farOff ? 'Peu d\'itinéraires proches de la distance demandée : change légèrement la distance ou le départ pour plus de choix.' : '') });
+      setFitKey(k => k + 1);
+    }catch(e){
+      const code = e && e.code;
+      setSt({ status: 'error', routes: [], done: 0, total: 12, note: code === 'auth' ? 'Clé OpenRouteService refusée. Vérifie-la (bouton « Changer la clé »).' : code === 'rate' ? 'Trop de requêtes : attends une minute puis réessaie.' : code === 'net' ? 'Impossible de joindre OpenRouteService. Vérifie ta connexion.' : code === 'empty' ? 'Aucun itinéraire trouvé autour de ce point. Essaie un autre départ ou une autre distance.' : 'OpenRouteService a refusé la demande' + (e && e.status ? ' (erreur ' + e.status + ')' : '') + '. Réessaie avec une autre distance ou un autre départ.' });
+    }
+  };
+
+  const chosen = st.routes[sel];
+  const kmTxt = (r) => (r.dist / 1000).toFixed(1).replace('.', ',') + ' km';
+  const gpxName = chosen ? 'Allure ' + kmTxt(chosen) + ' D+ ' + Math.round(chosen.ascent) + ' m' : '';
+  const [shareMsg, setShareMsg] = useState('');
+  const share = async () => { try{ const ok = await shareGpx(gpxName, toGpx(gpxName, chosen.coords)); setShareMsg(ok ? '' : 'Le partage de fichier n\'est pas disponible ici : utilise « Télécharger le GPX ».'); }catch(e){ if(!(e && e.name === 'AbortError')) setShareMsg('Partage impossible : utilise « Télécharger le GPX ».'); } };
+
+  if(!key) return (
+    <div className="card">
+      <h3>Connecter OpenRouteService</h3>
+      <p className="note">Le calcul des itinéraires passe par OpenRouteService, gratuit (2 000 calculs par jour). Crée un compte, génère une clé API (« Token »), puis colle-la ici. Elle reste sur ton téléphone.</p>
+      <p className="note" style={{ marginTop: 8 }}><a href="https://openrouteservice.org/dev/#/signup" target="_blank" rel="noopener noreferrer">Créer mon compte OpenRouteService</a></p>
+      <label className="f" htmlFor="ors-key">Clé API</label>
+      <input id="ors-key" type="password" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck="false" value={keyIn} onChange={(e) => { setKeyIn(e.target.value); setMsg(''); }} />
+      {msg && <p className="err" role="alert">{msg}</p>}
+      <div className="actions"><button className="btn" onClick={saveKey}>Enregistrer la clé</button></div>
+    </div>
+  );
+
+  return (
+    <div>
+      <label className="f">Objectif</label>
+      <div className="seg" role="tablist" aria-label="Objectif" style={{ margin: '6px 0 10px' }}>
+        {[['km', 'Distance'], ['min', 'Durée']].map(([v, l]) => <button key={v} role="tab" aria-selected={p.mode === v} className={p.mode === v ? 'on' : ''} onClick={() => set('mode', v)}>{l}</button>)}
+      </div>
+      {p.mode === 'km'
+        ? <div><label className="f" htmlFor="rb-km">Distance (km)</label><input id="rb-km" className="big" type="number" inputMode="decimal" min="2" max="60" step="0.5" value={p.km} onChange={(e) => set('km', e.target.value)} /></div>
+        : <div className="grid2">
+            <div><label className="f" htmlFor="rb-min">Durée (minutes)</label><input id="rb-min" className="big" type="number" inputMode="numeric" min="10" value={p.min} onChange={(e) => set('min', e.target.value)} /></div>
+            <div><label className="f" htmlFor="rb-pace">Allure (min/km)</label><input id="rb-pace" className="big" value={p.pace} onChange={(e) => set('pace', e.target.value)} placeholder="6:30" /></div>
+          </div>}
+      {p.mode === 'min' && valid && <p className="note" style={{ marginTop: 6 }}>≈ {(targetM / 1000).toFixed(1).replace('.', ',')} km à {Math.floor(paceSec / 60)}'{pad(paceSec % 60)}/km</p>}
+
+      <label className="f">Dénivelé</label>
+      <div className="seg three" role="tablist" aria-label="Dénivelé" style={{ margin: '6px 0 4px' }}>
+        {[['any', 'Peu importe'], ['flat', 'Plutôt plat'], ['hilly', 'Vallonné']].map(([v, l]) => <button key={v} role="tab" aria-selected={p.elev === v} className={p.elev === v ? 'on' : ''} onClick={() => set('elev', v)}>{l}</button>)}
+      </div>
+      <label className="checkrow"><input type="checkbox" checked={p.quiet} onChange={(e) => set('quiet', e.target.checked)} /> Privilégier parcs et rues calmes</label>
+
+      <label className="f">Départ</label>
+      <div className="actions" style={{ marginTop: 6 }}>
+        <button className="btn ghost" style={{ height: 42, padding: '0 14px' }} onClick={useMyPosition}>Ma position</button>
+        <button className={'btn ghost' + (picking ? ' on' : '')} style={{ height: 42, padding: '0 14px' }} onClick={() => setPicking(v => !v)}>{picking ? 'Touche la carte…' : 'Sur la carte'}</button>
+      </div>
+      <div className="rbsearch">
+        <input type="search" placeholder="Adresse ou lieu (ex. Parc Montsouris)" aria-label="Rechercher un lieu de départ" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter') search(); }} />
+        <button className="btn ghost" style={{ height: 46, padding: '0 16px' }} onClick={search}>Chercher</button>
+      </div>
+      {hits.map(h => <button key={h.place_id} className="hit" onClick={() => pickHit(h)}>{h.display_name}</button>)}
+      {msg && <p className={/impossible|indisponible|Aucun|Choisis|disponible/.test(msg) ? 'err' : 'note'} role="status" style={{ marginTop: 8 }}>{msg}</p>}
+      <p className="note" style={{ marginTop: 8 }}>{start ? 'Départ : ' + label : 'Aucun départ choisi pour le moment.'}</p>
+
+      <BuilderMap start={start} picking={picking} onPick={pickOnMap} routes={st.routes} sel={sel} onSel={setSel} fitKey={fitKey} />
+
+      <button className="btn full" onClick={generate} disabled={st.status === 'loading'}>{st.status === 'loading' ? 'Calcul des boucles… ' + st.done + '/' + st.total : 'Générer des itinéraires'}</button>
+      {st.status === 'error' && <p className="err" role="alert" style={{ marginTop: 10 }}>{st.note}</p>}
+      {st.status === 'done' && st.note && <p className="note" role="status" style={{ marginTop: 10 }}>{st.note}</p>}
+
+      {st.routes.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          {st.routes.map((r, i) => (
+            <button key={i} className={'rcand' + (i === sel ? ' on' : '')} onClick={() => setSel(i)} aria-pressed={i === sel} style={{ '--c': CAND_COLORS[i % 3] }}>
+              <span className="rc-main"><i></i><b>{kmTxt(r)}</b></span>
+              <span className="rc-sub">D+ {Math.round(r.ascent)} m · {hillLabel(r)} · ≈ {fmtMin(Math.round(r.dist / 1000 * paceSec / 60))}</span>
+            </button>
+          ))}
+          <div className="actions" style={{ marginTop: 10 }}>
+            <button className="btn" onClick={() => downloadGpx(gpxName, toGpx(gpxName, chosen.coords))}>Télécharger le GPX</button>
+            {typeof navigator !== 'undefined' && navigator.share && <button className="btn ghost" onClick={share}>Envoyer vers une app</button>}
+          </div>
+          {shareMsg && <p className="note" style={{ marginTop: 8 }}>{shareMsg}</p>}
+          <details className="howto">
+            <summary>Envoyer sur ma montre Suunto</summary>
+            <p>1. Télécharge le GPX (ou utilise « Envoyer vers une app » et choisis Suunto).<br/>2. Ouvre l'app Suunto, va dans la vue carte et touche le « + ».<br/>3. Importe le fichier GPX, enregistre l'itinéraire.<br/>4. Synchronise la montre : l'itinéraire apparaît dans la navigation.</p>
+          </details>
+        </div>
+      )}
+      <p className="note" style={{ marginTop: 18 }}>Itinéraires calculés par OpenRouteService, données © contributeurs OpenStreetMap. Le dénivelé vient d'un modèle d'altitude : il est indicatif. <button className="link" onClick={() => { lsSet(ORS_KEY, ''); setKey(''); }}>Changer la clé</button></p>
+    </div>
+  );
+}
+
+function MapPage({ icu, conn, todayStr, onSettings }){
+  const [mode, setMode] = useState('mine');
+  return (
+    <div>
+      <Header title="Carte" onSettings={onSettings} />
+      <div className="seg" role="tablist" aria-label="Carte" style={{ marginTop: 14 }}>
+        <button role="tab" aria-selected={mode === 'mine'} className={mode === 'mine' ? 'on' : ''} onClick={() => setMode('mine')}>Mes parcours</button>
+        <button role="tab" aria-selected={mode === 'new'} className={mode === 'new' ? 'on' : ''} onClick={() => setMode('new')}>Créer un itinéraire</button>
+      </div>
+      {mode === 'mine' ? <MyRoutes icu={icu} conn={conn} todayStr={todayStr} onSettings={onSettings} /> : <RouteBuilder />}
     </div>
   );
 }
@@ -1099,7 +1384,7 @@ function IcuSettings({ conn, icu, onConnect, onDisconnect, onRefresh }){
 }
 
 /* ---------- Aujourd'hui ---------- */
-function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps }){
+function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit }){
   const today = parse(todayStr);
   const [off, setOff] = useState(0);
   const touch = useRef(null);
@@ -1187,6 +1472,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
               {s.templateId && templates.some(t => t.id === s.templateId) && (
                 <button className="openlink" onClick={()=>onOpenMuscu(s.templateId, { wIdx, sid: s.id })}>Voir les exercices</button>
               )}
+              <button className="openlink" onClick={()=>onEdit(wIdx, s.id)}>Modifier la séance</button>
             </div>
             <button className="check" aria-label={s.done ? 'Marquer comme non faite' : 'Marquer comme faite'} aria-pressed={s.done} onClick={()=>onToggle(wIdx, s.id)}>
               <span className="c"><Icon name="check" size={18} sw={2.6} /></span>
@@ -1485,11 +1771,18 @@ function LogSheet({ date, onSave, onClose }){
 function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }){
   const [f, setF] = useState(initial);
   const [err, setErr] = useState('');
+  const [adj, setAdj] = useState({ dur: 0, pace: 0 });
+  const [later, setLater] = useState(false);
   const set = (k, v) => setF(prev => ({...prev, [k]: v}));
+  const cardio = ['course', 'velo', 'nage'].includes(f.discipline);
+  const minutes = parseTargetMinutes(f.target);
+  const paceStep = f.discipline === 'nage' ? 2 : 5;
+  const bumpDur = (n) => { const m = minutes || 0, nm = Math.max(5, m + n); setF(prev => ({ ...prev, target: setLeadingDuration(prev.target, nm) })); setAdj(a => ({ ...a, dur: a.dur + (nm - m) })); };
+  const bumpPace = (n) => { setF(prev => ({ ...prev, desc: shiftPaces(prev.desc, n) })); setAdj(a => ({ ...a, pace: a.pace + n })); };
   const save = () => {
     if(!f.desc.trim()){ setErr('Ajoute une description.'); return; }
     if(!f.date){ setErr('Choisis une date.'); return; }
-    onSave({ ...f, desc: f.desc.trim(), target: f.target.trim() });
+    onSave({ ...f, desc: f.desc.trim(), target: f.target.trim(), applyLater: later && (adj.dur || adj.pace) ? { ...adj } : null });
   };
   return (
     <Sheet title={isNew ? 'Nouvelle séance' : 'Modifier la séance'} onClose={onClose}>
@@ -1509,6 +1802,14 @@ function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }){
       )}
       <label className="f" htmlFor="s-date">Date</label>
       <input id="s-date" type="date" value={f.date} onChange={(e)=>{ set('date', e.target.value); setErr(''); }} />
+      {cardio && (
+        <div className="adjust">
+          <label className="f">Ajuster</label>
+          <div className="stepper"><span>Durée</span><button onClick={()=>bumpDur(-5)} aria-label="Retirer 5 minutes">−5 min</button><b>{minutes ? dur(minutes) : '–'}</b><button onClick={()=>bumpDur(5)} aria-label="Ajouter 5 minutes">+5 min</button></div>
+          {hasPace(f.desc) && <div className="stepper"><span>Allure</span><button onClick={()=>bumpPace(-paceStep)} aria-label={'Plus rapide de ' + paceStep + ' secondes'}>−{paceStep} s</button><b>{f.discipline === 'nage' ? 'par 100 m' : 'par km'}</b><button onClick={()=>bumpPace(paceStep)} aria-label={'Plus lent de ' + paceStep + ' secondes'}>+{paceStep} s</button></div>}
+          {!isNew && (adj.dur || adj.pace) ? <label className="checkrow"><input type="checkbox" checked={later} onChange={(e)=>setLater(e.target.checked)} /> Appliquer aussi aux prochaines séances du même type ce jour-là</label> : null}
+        </div>
+      )}
       <label className="f" htmlFor="s-desc">Description</label>
       <input id="s-desc" value={f.desc} placeholder="Sortie longue Z2" onChange={(e)=>{ set('desc', e.target.value); setErr(''); }} />
       <label className="f" htmlFor="s-tgt">Objectif</label>
@@ -1736,9 +2037,10 @@ function FinishSheet({ title, date, onSave, onClose }){
 }
 
 /* ---------- Réglages ---------- */
-function Settings({ profile, setProfile, onBack, onReset, onLoadPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
+function Settings({ profile, setProfile, onBack, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
   const [f, setF] = useState(profile);
   const [saved, setSaved] = useState(false);
+  const [adjMsg, setAdjMsg] = useState('');
   const fileRef = useRef(null);
   const set = (k, v) => { setF(prev => ({...prev, [k]: v})); setSaved(false); };
   const num = (k) => ({ type:'number', inputMode:'numeric', value:f[k], onChange:(e)=>set(k, e.target.value) });
@@ -1785,6 +2087,20 @@ function Settings({ profile, setProfile, onBack, onReset, onLoadPlan, getData, o
         <div className="actions">
           <button className="btn ghost" onClick={()=>{ const st = onLoadPlan(zonesNum()); if(st) set('programStart', st); }}>Recharger le programme type</button>
         </div>
+      </div>
+
+      <div className="card">
+        <h3>Ajuster le programme</h3>
+        <p className="note">Modifie toutes les séances de cardio à venir en une fois. Pour une seule séance, ouvre-la depuis l'accueil ou le calendrier.</p>
+        <label className="f">Allures de course</label>
+        <div className="actions" style={{marginTop:6}}>
+          {[-10, -5, 5, 10].map(n => <button key={n} className="btn ghost" style={{height:42, padding:'0 14px'}} onClick={()=>{ if(confirm('Décaler toutes les allures de course à venir de ' + (n > 0 ? '+' : '−') + Math.abs(n) + ' s/km ?')){ onShiftPlan({ pace: n }); setAdjMsg('Allures de course décalées de ' + (n > 0 ? '+' : '−') + Math.abs(n) + ' s/km.'); } }}>{n > 0 ? '+' : '−'}{Math.abs(n)} s/km</button>)}
+        </div>
+        <label className="f">Durées du cardio</label>
+        <div className="actions" style={{marginTop:6}}>
+          {[-10, 10].map(n => <button key={n} className="btn ghost" style={{height:42, padding:'0 14px'}} onClick={()=>{ if(confirm('Modifier de ' + (n > 0 ? '+' : '−') + '10 % la durée de toutes les séances de cardio à venir ?')){ onShiftPlan({ durPct: n }); setAdjMsg('Durées modifiées de ' + (n > 0 ? '+' : '−') + '10 %.'); } }}>{n > 0 ? '+' : '−'}10 %</button>)}
+        </div>
+        {adjMsg && <p className="note" role="status" style={{marginTop:12}}>{adjMsg}</p>}
       </div>
 
       <div className="card">
@@ -1949,7 +2265,7 @@ function App(){
   };
 
   // déplace une séance vers une date (crée les semaines manquantes) et applique d'éventuelles modifications
-  const placeSession = (wIdx, sid, iso, fields) => {
+  const placeSession = (wIdx, sid, iso, fields, post) => {
     const loc = locateWeek(program, profile.programStart, iso);
     const fw = wIdx + loc.shift;
     const old = loc.program[fw] && loc.program[fw].sessions.find(x => x.id === sid);
@@ -1961,15 +2277,19 @@ function App(){
       if(i === loc.wIdx) ss = [...ss, moved];
       return ss === w.sessions ? w : { ...w, sessions: ss };
     });
-    setProgram(prog);
+    setProgram(post ? post(prog, loc.programStart) : prog);
     if(loc.programStart !== profile.programStart) setProfile(p => ({ ...p, programStart: loc.programStart }));
     setWorkouts(ws => ws.map(w => w.sessionId === sid ? { ...w, date: iso, ...(fields && fields.discipline ? { discipline: fields.discipline } : {}) } : w));
   };
 
   const saveSession = (wIdx, sid, data) => {
-    const { date, ...fields } = data;
+    const { date, applyLater, ...fields } = data;
     if(sid){
-      placeSession(wIdx, sid, date, fields);
+      const later = !applyLater ? null : (prog, start) => {
+        const base = startOfWeek(parse(start)), day = (parse(date).getDay() + 6) % 7;
+        return prog.map((w, i) => ({ ...w, sessions: w.sessions.map(x => (x.id === sid || x.done || x.discipline !== fields.discipline || x.day !== day || fmt(addDays(base, i * 7 + x.day)) <= date) ? x : applyDelta(x, applyLater)) }));
+      };
+      placeSession(wIdx, sid, date, fields, later);
     } else {
       const loc = locateWeek(program, profile.programStart, date);
       setProgram(loc.program.map((w, i) => i !== loc.wIdx ? w : { ...w, sessions: [...w.sessions, { ...fields, id: uid(), day: loc.day, done: false }] }));
@@ -1993,6 +2313,15 @@ function App(){
     const tpls = d.templates || defaultTemplates();
     setSteps(d.steps || {}); setWorkouts(d.workouts || []); setProgram(d.program || buildProgram(tpls, ((d.profile || {}).zones))); setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) }); setTemplates(tpls);
   };
+  const shiftPlan = (o) => {
+    setProgram(program.map((w, i) => ({ ...w, sessions: w.sessions.map(x => {
+      if(x.done || fmt(addDays(weekStartFor(i), x.day)) < todayStr || !['course', 'velo', 'nage'].includes(x.discipline)) return x;
+      let y = x;
+      if(o.pace && x.discipline === 'course') y = { ...y, desc: shiftPaces(y.desc, o.pace) };
+      if(o.durPct){ const m = parseTargetMinutes(y.target); if(m) y = { ...y, target: setLeadingDuration(y.target, Math.max(5, Math.round(m * (1 + o.durPct / 100) / 5) * 5)) }; }
+      return y;
+    }) })));
+  };
   const loadPlan = (zones) => {
     if(!confirm("Remplacer le calendrier par le programme type ? Les séances déjà enregistrées restent dans l'historique.")) return null;
     const st = planStart();
@@ -2014,7 +2343,7 @@ function App(){
   return (
     <div>
       <main className="shell">
-        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} />}
+        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })} />}
         {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} onToggle={toggleSession}
             onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })}
             onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
@@ -2030,7 +2359,7 @@ function App(){
         })()}
         {page==='map' && <MapPage icu={icu} conn={icuConn} todayStr={todayStr} onSettings={openSettings} />}
         {page==='history' && <History workouts={workouts} onDelete={deleteWorkout} onSettings={openSettings} />}
-        {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onReset={reset} onLoadPlan={loadPlan}
+        {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onReset={reset} onLoadPlan={loadPlan} onShiftPlan={shiftPlan}
             getData={()=>({ workouts, program, profile, templates, steps })} onImport={importData}
             icuConn={icuConn} icu={icu} onConnectIcu={connectIcu} onDisconnectIcu={disconnectIcu} onRefreshIcu={()=>refreshIcu()} />}
       </main>
