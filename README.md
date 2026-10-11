@@ -1,6 +1,6 @@
 # Allure
 
-Suivi d'entraînement triathlon (course, vélo, natation, muscu) avec tableau de bord Intervals.icu.
+Suivi d'entraînement (course, vélo, natation, musculation) avec tableau de bord Intervals.icu.
 Application web installable (PWA) : aucune base de données ni serveur, tout reste dans le navigateur du téléphone.
 
 ## Mettre en ligne (GitHub Pages)

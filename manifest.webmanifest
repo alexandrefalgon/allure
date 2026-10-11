@@ -1,7 +1,7 @@
 {
-  "name": "ALLURE — Suivi & coach triathlon",
+  "name": "ALLURE — Suivi sportif",
   "short_name": "Allure",
-  "description": "Suivi d'entraînement et coach triathlon",
+  "description": "Suivi d'entraînement : course, vélo, natation, musculation",
   "lang": "fr",
   "start_url": "./",
   "scope": "./",

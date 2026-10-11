@@ -42,43 +42,59 @@ function parseTargetMinutes(t){
 const uid = () => Math.random().toString(36).slice(2,10);
 
 const DEFAULT_PROFILE = {
-  maxHR: 212, z2Low: 127, z2High: 148, raceZoneLow: 180, raceZoneHigh: 195,
-  ironmanDate: '', programStart: fmt(new Date()),
+  maxHR: 212, zones: [[116, 146], [147, 160], [161, 175], [176, 190], [191, 205]],
+  programStart: fmt(new Date()),
 };
 
-function defaultProgram(){
-  return [
-    { id: uid(), sessions: [
-      { id: uid(), discipline:'course', day:1, desc:'Endurance fondamentale Z2', target:'45 min, Z2 (127-148 bpm)', done:false },
-      { id: uid(), discipline:'muscu', day:2, desc:'Renfort général — full body', target:'45 min, charges modérées', done:false },
-      { id: uid(), discipline:'velo', day:3, desc:'Sortie longue Z2', target:'1h30, Z2', done:false },
-      { id: uid(), discipline:'nage', day:4, desc:'Technique + endurance', target:'40 min, SWOLF focus', done:false },
-      { id: uid(), discipline:'course', day:5, desc:'Repos ou footing très léger', target:'0-30 min, très facile', done:false },
-      { id: uid(), discipline:'velo', day:6, desc:'Sortie longue Z2', target:'2h00, Z2', done:false },
-    ]},
-    { id: uid(), sessions: [
-      { id: uid(), discipline:'course', day:1, desc:'Endurance fondamentale Z2', target:'50 min, Z2', done:false },
-      { id: uid(), discipline:'muscu', day:2, desc:'Renfort — bas du corps', target:'45 min', done:false },
-      { id: uid(), discipline:'nage', day:3, desc:'Endurance nage libre', target:'45 min', done:false },
-      { id: uid(), discipline:'velo', day:4, desc:'Sortie Z2 + gammes', target:'1h30, Z2', done:false },
-      { id: uid(), discipline:'course', day:5, desc:'Sortie longue Z2', target:'1h00, Z2', done:false },
-      { id: uid(), discipline:'velo', day:6, desc:'Sortie longue Z2', target:'2h15, Z2', done:false },
-    ]},
-    { id: uid(), sessions: [
-      { id: uid(), discipline:'course', day:1, desc:'Endurance fondamentale Z2', target:'50 min, Z2', done:false },
-      { id: uid(), discipline:'muscu', day:2, desc:'Renfort général', target:'45 min', done:false },
-      { id: uid(), discipline:'nage', day:3, desc:'Endurance + technique', target:'45 min', done:false },
-      { id: uid(), discipline:'velo', day:4, desc:'Sortie Z2', target:'1h45, Z2', done:false },
-      { id: uid(), discipline:'course', day:5, desc:'Sortie longue Z2', target:'1h10, Z2', done:false },
-      { id: uid(), discipline:'velo', day:6, desc:'Sortie longue Z2', target:'2h30, Z2', done:false },
-    ]},
-    { id: uid(), sessions: [
-      { id: uid(), discipline:'course', day:1, desc:'Récupération active', target:'30 min, très facile', done:false },
-      { id: uid(), discipline:'muscu', day:2, desc:'Renfort léger', target:'30 min', done:false },
-      { id: uid(), discipline:'nage', day:3, desc:'Récupération technique', target:'30 min', done:false },
-      { id: uid(), discipline:'velo', day:5, desc:'Sortie modérée', target:'1h00, Z2', done:false },
-    ]},
-  ];
+/* ---------- programme type (12 semaines : 3 blocs de 3 semaines de charge + 1 semaine allégée) ----------
+   Lun  Push + Course facile
+   Mar  Pull
+   Mer  Course qualité
+   Jeu  Jambes
+   Ven  (repos)
+   Sam  Sortie longue (vélo) + Rappel haut du corps
+   Dim  Natation */
+const dur = (m) => m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + pad(m % 60);
+const DELOAD_WEEKS = [3, 7, 11];
+const P_RUN_Q = [
+  'Fartlek : 8 × (1 min vite / 1 min trot)', 'Fractionné : 6 × 3 min à 5\'15/km, récup 90 s', 'Fractionné : 5 × 1000 m à 5\'05/km, récup 2 min', 'Fartlek léger : 6 × (1 min vite / 2 min trot)',
+  'Seuil : 3 × 10 min à 5\'20/km, récup 2 min', 'Fractionné : 6 × 1000 m à 5\'00/km, récup 90 s', 'Seuil : 2 × 15 min à 5\'15/km, récup 3 min', 'Fractionné léger : 5 × 3 min à 5\'10/km, récup 90 s',
+  'Fractionné : 5 × 1200 m à 5\'00/km, récup 2 min', 'Seuil : 3 × 12 min à 5\'15/km, récup 2 min', 'Fractionné : 8 × 800 m à 4\'55/km, récup 90 s', 'Test : 5 km chrono (échauffement 15 min)',
+];
+const P_RUN_Q_MIN = [45, 50, 55, 40, 55, 60, 60, 45, 60, 60, 60, 50];
+const P_RUN_EASY = [30, 35, 35, 25, 35, 40, 40, 30, 40, 40, 45, 30];
+const P_BIKE_LONG = [90, 105, 120, 75, 120, 135, 150, 90, 150, 165, 180, 100];
+const P_SWIM = [
+  '5 × 200 m à 1\'45/100 m, récup 20 s', '6 × 200 m à 1\'43/100 m, récup 20 s', '8 × 150 m à 1\'42/100 m, récup 15 s', '4 × 200 m souples',
+  '3 × 400 m à 1\'42/100 m, récup 30 s', '10 × 100 m à 1\'38/100 m, récup 15 s', '2 × 600 m à 1\'42/100 m, récup 40 s', '4 × 200 m souples',
+  '4 × 400 m à 1\'40/100 m, récup 30 s', '12 × 100 m à 1\'35/100 m, récup 15 s', '1500 m continu à 1\'42/100 m', 'Test : 400 m puis 200 m chrono',
+];
+const P_SWIM_M = [1700, 1900, 2000, 1400, 2100, 2200, 2300, 1700, 2400, 2500, 2600, 1700];
+const swimMin = (m) => Math.round(m * 0.027 / 5) * 5;
+
+function buildProgram(templates, zones){
+  const Zn = zones && zones.length === 5 ? zones : DEFAULT_PROFILE.zones;
+  const z1 = (n) => 'Z' + n + ' (' + Zn[n - 1][0] + '–' + Zn[n - 1][1] + ' bpm)';
+  const zr = (a, b) => 'Z' + a + '-Z' + b + ' (' + Zn[a - 1][0] + '–' + Zn[b - 1][1] + ' bpm)';
+  const qZone = [z1(5), z1(4), zr(4, 5), z1(5), z1(4), zr(4, 5), z1(4), z1(4), zr(4, 5), z1(4), z1(5), ''];
+  const tid = (name) => { const t = (templates || []).find(x => x.name === name); return t ? t.id : ''; };
+  return Array.from({ length: 12 }, (_, i) => {
+    const dl = DELOAD_WEEKS.includes(i), blk = Math.floor(i / 4);
+    const S = (discipline, day, desc, target, templateId) => ({ id: uid(), discipline, day, desc, target, done: false, ...(templateId ? { templateId } : {}) });
+    const muscuT = dl ? ' · semaine allégée (−10 % de charge)' : '';
+    const longDesc = dl ? 'Sortie souple ' + zr(1, 2) : blk === 0 ? 'Sortie longue ' + zr(1, 2) : 'Sortie longue ' + zr(1, 2) + ' dont ' + (blk === 1 ? 2 : 3) + ' × 15 min en ' + z1(3);
+    const swolf = dl || i === 11 ? '' : ' · SWOLF visé ≤ ' + [38, 37, 36][blk];
+    return { id: uid(), sessions: [
+      S('course', 0, 'Footing très facile ' + z1(1), dur(P_RUN_EASY[i])),
+      S('muscu', 0, 'Push : poussée', dur(60) + muscuT, tid('Push force')),
+      S('muscu', 1, 'Pull : tirage', dur(60) + muscuT, tid('Pull force')),
+      S('course', 2, P_RUN_Q[i] + (qZone[i] ? ' · efforts en ' + qZone[i] : ''), dur(P_RUN_Q_MIN[i]) + ' · échauffement 15 min, retour au calme 10 min'),
+      S('muscu', 3, 'Jambes : séance lourde', dur(65) + muscuT, tid('Jambes force')),
+      S('velo', 5, longDesc, dur(P_BIKE_LONG[i])),
+      S('muscu', 5, 'Rappel haut du corps : séance légère', dur(50) + muscuT, tid('Rappel haut du corps force')),
+      S('nage', 6, 'Éducatifs 300 m + ' + P_SWIM[i] + swolf, dur(swimMin(P_SWIM_M[i])) + ' · ' + P_SWIM_M[i] + ' m'),
+    ]};
+  });
 }
 
 
@@ -137,6 +153,34 @@ function loadState(){
   return null;
 }
 function saveState(s){ try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){} }
+
+const PLAN_VERSION = 3;
+// début du plan : le lundi de cette semaine si on est lundi ou mardi, sinon lundi prochain
+function planStart(){ const d = new Date(), dow = (d.getDay() + 6) % 7; return fmt(dow <= 1 ? addDays(d, -dow) : addDays(d, 7 - dow)); }
+function bootState(){
+  const init = loadState();
+  if(!init){
+    const templates = defaultTemplates();
+    return { workouts: [], templates, program: buildProgram(templates, DEFAULT_PROFILE.zones), profile: { ...DEFAULT_PROFILE, programStart: planStart() }, planVersion: PLAN_VERSION };
+  }
+  if(init.planVersion === PLAN_VERSION) return init;
+  // ancien plan (préparation triathlon) → nouveau programme ; l'historique des séances est conservé
+  const templates = init.templates && init.templates.length ? init.templates : defaultTemplates();
+  const { ironmanDate, z2Low, z2High, raceZoneLow, raceZoneHigh, ...prof } = init.profile || {};
+  const profile = { ...DEFAULT_PROFILE, ...prof, programStart: planStart() };
+  return { ...init, templates, program: buildProgram(templates, profile.zones), profile,
+           workouts: (init.workouts || []).map(({ sessionId, ...w }) => w), planVersion: PLAN_VERSION };
+}
+
+// retrouve (ou crée) la semaine du plan qui contient une date
+function locateWeek(program, programStart, iso){
+  let base = startOfWeek(parse(programStart));
+  const d = parse(iso);
+  let idx = Math.floor(diffDays(startOfWeek(d), base) / 7), shift = 0, prog = program;
+  if(idx < 0){ shift = -idx; prog = [...Array.from({ length: shift }, () => ({ id: uid(), sessions: [] })), ...prog]; base = addDays(base, -7 * shift); idx = 0; }
+  while(prog.length <= idx) prog = [...prog, { id: uid(), sessions: [] }];
+  return { program: prog, programStart: fmt(base), shift, wIdx: idx, day: (d.getDay() + 6) % 7 };
+}
 
 
 /* ---------- Intervals.icu ---------- */
@@ -246,6 +290,7 @@ const PATHS = {
   check:   <path d="M5 12.5l4.5 4.5L19 7.5"/>,
   chevron: <path d="M6 9l6 6 6-6"/>,
   back:    <path d="M15 5l-7 7 7 7"/>,
+  next:    <path d="M9 5l7 7-7 7"/>,
   refresh: <path d="M20 11a8 8 0 1 0-2.4 5.7M20 4.5V11h-6.5"/>,
   close:   <path d="M6 6l12 12M18 6L6 18"/>,
 };
@@ -339,13 +384,6 @@ const dominantKind = (list) => {
   const t = {}; list.forEach(a => { t[a.kind] = (t[a.kind] || 0) + a.secs; });
   return Object.keys(t).sort((x, y) => t[y] - t[x])[0] || null;
 };
-function formLabel(tsb){
-  if(tsb > 30) return 'Très frais';
-  if(tsb > 10) return 'Frais';
-  if(tsb >= -10) return 'Entretien';
-  if(tsb >= -30) return 'En progression';
-  return 'Surcharge';
-}
 
 function buildDash(icu, todayStr){
   const t = parse(todayStr);
@@ -379,14 +417,13 @@ function buildDash(icu, todayStr){
   const byDate = {}; w.forEach(x => { byDate[x.date] = x; });
   const series = (key) => { const out = []; for(let i = 6; i >= 0; i--){ const x = byDate[fmt(addDays(t, -i))]; out.push(x && x[key] ? x[key] : null); } return out; };
   const latest = (key) => { for(let i = w.length - 1; i >= 0; i--) if(w[i][key]) return w[i]; return null; };
-  const fit = (() => { for(let i = w.length - 1; i >= 0; i--) if(w[i].ctl != null && w[i].atl != null) return w[i]; return null; })();
 
   return {
     cumThis, cumPrev, day, prevLen, deltaDur: (cumThis[day - 1] || 0) - (cumPrev[pn - 1] || 0), hasPrev: prev.length > 0,
     monthTotal: cumThis[day - 1] || 0, calendar, lead, daysIn, today: day, sports,
     last7, last7Total: sumBy(last7, x => x.total), prev7Total: sumBy(prev7, x => x),
     elev: sumBy(month, a => a.elev), elevDelta: sumBy(month, a => a.elev) - sumBy(prevSame, a => a.elev),
-    fit, sleep: { s: series('sleep'), last: latest('sleep') }, rhr: { s: series('rhr'), last: latest('rhr') },
+    sleep: { s: series('sleep'), last: latest('sleep') }, rhr: { s: series('rhr'), last: latest('rhr') },
     hrv: { s: series('hrv'), last: latest('hrv') }, steps: latest('steps'),
     monthName: MONTHS_LONG[t.getMonth()], prevName: MONTHS[t.getMonth() === 0 ? 11 : t.getMonth() - 1],
     dd: pad(day) + '/' + pad(t.getMonth() + 1), d1: '01/' + pad(t.getMonth() + 1),
@@ -506,29 +543,11 @@ function Dash({ icu, todayStr }){
           </Card>
         )}
 
-        {D.fit && (
-          <Card title="Forme" sub="Aujourd'hui">
-            <p className="label">{formLabel(D.fit.ctl - D.fit.atl)}</p>
-            <div className="trio">
-              <div><b>{Math.round(D.fit.ctl)}</b><span>Fitness</span></div>
-              <div><b>{Math.round(D.fit.atl)}</b><span>Fatigue</span></div>
-              <div><b>{(() => { const v = Math.round(D.fit.ctl - D.fit.atl); return (v > 0 ? '+' : '') + v; })()}</b><span>Forme</span></div>
-            </div>
-          </Card>
-        )}
-
         <Card title="Durée" sub="7 derniers jours">
           <p className="num">{fmtHM(D.last7Total)}</p>
           <p className="delta">{signedMin(D.last7Total - D.prev7Total)} vs semaine préc.</p>
           <StackBars days={D.last7} />
         </Card>
-
-        {D.elev > 0 && (
-          <Card title="Dénivelé" sub="Ce mois-ci">
-            <p className="num">{Math.round(D.elev)}<span className="u">m</span></p>
-            {D.hasPrev && <p className="delta">{(D.elevDelta < 0 ? '−' : '+') + Math.abs(Math.round(D.elevDelta))} m vs {D.prevName}</p>}
-          </Card>
-        )}
 
         {D.sleep.last && (
           <Card title="Sommeil" sub={dayLabel(D.sleep.last)}>
@@ -600,7 +619,10 @@ function IcuSettings({ conn, icu, onConnect, onDisconnect, onRefresh }){
 /* ---------- Aujourd'hui ---------- */
 function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings }){
   const today = parse(todayStr);
-  const weekStart = startOfWeek(today);
+  const [off, setOff] = useState(0);
+  const touch = useRef(null);
+  useEffect(() => { setOff(0); }, [todayStr]);
+  const weekStart = addDays(startOfWeek(today), off * 7);
   const wIdx = Math.floor(diffDays(weekStart, startOfWeek(parse(profile.programStart))) / 7);
   const week = wIdx >= 0 && wIdx < program.length ? program[wIdx] : null;
 
@@ -614,23 +636,43 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
   });
   const total = week ? week.sessions.length : 0;
   const done = week ? week.sessions.filter(s => s.done).length : 0;
-  const cur = days.find(d => d.iso === sel) || days.find(d => d.iso === todayStr);
+  const cur = days.find(d => d.iso === sel) || days.find(d => d.iso === todayStr) || days[0];
   const isToday = cur.iso === todayStr;
   const icuDay = icuConn ? icu.activities.filter(a => a.date === cur.iso) : [];
-  const raceIn = profile.ironmanDate ? diffDays(parse(profile.ironmanDate), today) : null;
+
+  const goWeek = (delta) => {
+    const n = Math.max(-52, Math.min(52, off + delta));
+    if(n === off) return;
+    setOff(n);
+    setSel(n === 0 ? todayStr : fmt(addDays(addDays(startOfWeek(today), n * 7), cur.i)));
+  };
+  const backToToday = () => { setOff(0); setSel(todayStr); };
+  const onTouchStart = (e) => { const t = e.touches[0]; touch.current = { x: t.clientX, y: t.clientY }; };
+  const onTouchEnd = (e) => {
+    const s0 = touch.current; touch.current = null;
+    if(!s0) return;
+    const t = e.changedTouches[0], dx = t.clientX - s0.x, dy = t.clientY - s0.y;
+    if(Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) goWeek(dx < 0 ? 1 : -1);
+  };
 
   let sub = longDate(today);
-  if(raceIn !== null && raceIn > 0) sub += ' · Ironman 70.3 dans ' + raceIn + ' j';
-  if(raceIn === 0) sub += ' · jour de course';
 
   return (
     <div>
       <Header title="Aujourd'hui" sub={sub} onSettings={onSettings} />
       <IcuBlock conn={icuConn} icu={icu} onRefresh={onRefreshIcu} onConnect={onSettings} weekFrom={fmt(weekStart)} weekTo={fmt(addDays(weekStart, 6))} />
 
+      <div className="swipe" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="weekbar">
-        <b>{week ? 'Semaine ' + (wIdx+1) : 'Hors programme'}</b>
-        {week && <span>{done} sur {total} faites</span>}
+        <div>
+          <b>{week ? 'Semaine ' + (wIdx+1) : 'Hors programme'}</b>
+          <span>{shortDate(weekStart)} – {shortDate(addDays(weekStart, 6))}{week ? ' · ' + done + ' sur ' + total + ' faites' : ''}</span>
+        </div>
+        <div className="wnav">
+          {off !== 0 && <button className="wtoday" onClick={backToToday}>Aujourd'hui</button>}
+          <button aria-label="Semaine précédente" onClick={()=>goWeek(-1)}><Icon name="back" size={20} /></button>
+          <button aria-label="Semaine suivante" onClick={()=>goWeek(1)}><Icon name="next" size={20} /></button>
+        </div>
       </div>
       <div className="strip">
         {days.map(d => (
@@ -693,60 +735,155 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
       {cur.planned.length === 0 && cur.free.length === 0 && icuDay.length === 0 && (
         <p className="rest">{week ? 'Repos.' : 'Rien de prévu.'}</p>
       )}
+      </div>
       {icuConn && icu.fetchedAt && <Dash icu={icu} todayStr={todayStr} />}
     </div>
   );
 }
 
-/* ---------- Plan ---------- */
-function Plan({ program, profile, todayStr, onToggle, onEdit, onAdd, onAddWeek, onDeleteWeek, onSettings }){
-  const curIdx = Math.floor(diffDays(startOfWeek(parse(todayStr)), startOfWeek(parse(profile.programStart))) / 7);
-  const firstOpen = program[curIdx] ? program[curIdx].id : (program[0] && program[0].id);
-  const [open, setOpen] = useState(()=> new Set(firstOpen ? [firstOpen] : []));
-  const toggleOpen = (id) => setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+/* ---------- Calendrier ---------- */
+function chipLabel(s, templates){
+  if(s.discipline === 'muscu'){
+    const t = s.templateId && templates.find(x => x.id === s.templateId);
+    if(t) return t.name.replace(/ force$/i, '').replace(/^Rappel haut du corps/i, 'Haut');
+  }
+  return s.discipline === 'nage' ? 'Nage' : DISC[s.discipline].short;
+}
+
+function Calendar({ program, profile, todayStr, templates, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }){
+  const today = parse(todayStr);
+  const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
+  const [selDay, setSelDay] = useState(todayStr);
+  const [ghost, setGhost] = useState(null);
+  const [over, setOver] = useState(null);
+  const drag = useRef(null);
+  const timer = useRef(null);
+  const latest = useRef({});
+  latest.current = { onMove };
   const base = startOfWeek(parse(profile.programStart));
+
+  const byDate = useMemo(() => {
+    const m = {};
+    program.forEach((w, i) => w.sessions.forEach(x => {
+      const iso = fmt(addDays(base, i * 7 + x.day));
+      (m[iso] = m[iso] || []).push({ s: x, w: i });
+    }));
+    Object.keys(m).forEach(k => m[k].sort((p, q) => (p.s.discipline === 'muscu') - (q.s.discipline === 'muscu')));
+    return m;
+  }, [program, profile.programStart]);
+
+  // glisser-déposer : appui long sur une séance (tactile) ou simple glissement (souris)
+  useEffect(() => {
+    const cellAt = (x, y) => { const el = document.elementFromPoint(x, y), c = el && el.closest ? el.closest('[data-iso]') : null; return c ? c.getAttribute('data-iso') : null; };
+    const stop = () => { clearTimeout(timer.current); drag.current = null; setGhost(null); setOver(null); };
+    const activate = (st) => { st.active = true; setGhost({ x: st.x, y: st.y, label: st.label, color: st.color }); setOver(st.from); try{ navigator.vibrate && navigator.vibrate(12); }catch(e){} };
+    const move = (e) => {
+      const st = drag.current;
+      if(!st || e.pointerId !== st.pid) return;
+      st.x = e.clientX; st.y = e.clientY;
+      if(!st.active){
+        if(Math.hypot(e.clientX - st.sx, e.clientY - st.sy) > 8){
+          if(st.mouse){ clearTimeout(timer.current); activate(st); } else { clearTimeout(timer.current); drag.current = null; }
+        }
+        return;
+      }
+      setGhost(g => g && { ...g, x: e.clientX, y: e.clientY });
+      setOver(cellAt(e.clientX, e.clientY));
+    };
+    const up = (e) => {
+      const st = drag.current;
+      if(!st || e.pointerId !== st.pid) return;
+      const was = st.active, iso = was ? cellAt(e.clientX, e.clientY) : null;
+      stop();
+      if(was && iso && iso !== st.from) latest.current.onMove(st.w, st.sid, iso);
+    };
+    const blockScroll = (e) => { if(drag.current && drag.current.active && e.cancelable) e.preventDefault(); };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', stop);
+    document.addEventListener('touchmove', blockScroll, { passive: false });
+    return () => {
+      document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', stop); document.removeEventListener('touchmove', blockScroll);
+      clearTimeout(timer.current);
+    };
+  }, []);
+
+  const onChipDown = (e, w, x, iso) => {
+    if(e.pointerType === 'mouse' && e.button !== 0) return;
+    const st = { pid: e.pointerId, sx: e.clientX, sy: e.clientY, x: e.clientX, y: e.clientY, w, sid: x.id, from: iso, mouse: e.pointerType === 'mouse', active: false,
+                 label: chipLabel(x, templates), color: DISC[x.discipline].color };
+    drag.current = st;
+    clearTimeout(timer.current);
+    if(!st.mouse) timer.current = setTimeout(() => { if(drag.current === st){ const act = st; act.active = true; setGhost({ x: act.x, y: act.y, label: act.label, color: act.color }); setOver(act.from); try{ navigator.vibrate && navigator.vibrate(12); }catch(er){} } }, 350);
+  };
+
+  const gridStart = startOfWeek(month);
+  const lastDay = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  const rows = Math.ceil((diffDays(lastDay, gridStart) + 1) / 7);
+  const cells = Array.from({ length: rows * 7 }, (_, i) => addDays(gridStart, i));
+  const shiftMonth = (n) => setMonth(m => new Date(m.getFullYear(), m.getMonth() + n, 1));
+  const goToday = () => { setMonth(new Date(today.getFullYear(), today.getMonth(), 1)); setSelDay(todayStr); };
+  const monthTitle = MONTHS_LONG[month.getMonth()] + ' ' + month.getFullYear();
+  const dayList = byDate[selDay] || [];
+  const onCurrentMonth = month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth();
 
   return (
     <div>
-      <Header title="Plan" sub={program.length + ' semaines'} onSettings={onSettings} />
-      <div style={{height:20}}></div>
-      {program.map((w, i) => {
-        const isOpen = open.has(w.id);
-        const start = addDays(base, i*7), end = addDays(start, 6);
-        const done = w.sessions.filter(s=>s.done).length;
-        return (
-          <div key={w.id} className={"week"+(isOpen?" open":"")}>
-            <button className="week-head" aria-expanded={isOpen} onClick={()=>toggleOpen(w.id)}>
-              <div>
-                <h3>Semaine {i+1}{i===curIdx ? ' · en cours' : ''}</h3>
-                <p className="s">{shortDate(start)} – {shortDate(end)} · {done}/{w.sessions.length}</p>
-              </div>
-              <Icon name="chevron" />
-            </button>
-            {isOpen && (
-              <div className="week-body">
-                {w.sessions.slice().sort((a,b)=>a.day-b.day).map(s => (
-                  <div key={s.id} className={"prow"+(s.done?" done":"")} style={{'--c':DISC[s.discipline].color}}>
-                    <span className="d">{DAYS_ABBR[s.day]}</span>
-                    <button className="m" onClick={()=>onEdit(i, s.id)} aria-label={'Modifier : ' + s.desc}>
-                      <div className="t"><i></i>{s.desc}</div>
-                      {s.target && <div className="g">{s.target}</div>}
-                    </button>
-                    <button className="mini" aria-label={s.done ? 'Marquer comme non faite' : 'Marquer comme faite'} aria-pressed={s.done} onClick={()=>onToggle(i, s.id)}>
-                      <span className="c"><Icon name="check" size={15} sw={3} /></span>
-                    </button>
-                  </div>
-                ))}
-                <div className="week-actions">
-                  <button className="btn ghost" style={{height:42, padding:'0 18px'}} onClick={()=>onAdd(i)}>+ Séance</button>
-                  <button className="link" onClick={()=>onDeleteWeek(i)}>Supprimer la semaine</button>
+      <Header title="Calendrier" sub="Maintiens une séance pour la déplacer" onSettings={onSettings} />
+      <div className="cal-nav">
+        <b>{monthTitle}</b>
+        <div className="wnav">
+          {!onCurrentMonth && <button className="wtoday" onClick={goToday}>Aujourd'hui</button>}
+          <button aria-label="Mois précédent" onClick={()=>shiftMonth(-1)}><Icon name="back" size={20} /></button>
+          <button aria-label="Mois suivant" onClick={()=>shiftMonth(1)}><Icon name="next" size={20} /></button>
+        </div>
+      </div>
+      <div className="cal-head">{DAYS_LETTER.map((l, i) => <span key={i}>{l}</span>)}</div>
+      <div className="cal-grid">
+        {cells.map(d => {
+          const iso = fmt(d), list = byDate[iso] || [];
+          return (
+            <div key={iso} data-iso={iso} aria-label={longDate(d)}
+                 className={"cal-cell" + (d.getMonth() === month.getMonth() ? '' : ' out') + (iso === todayStr ? ' today' : '') + (iso === selDay ? ' sel' : '') + (over === iso ? ' over' : '')}
+                 onClick={()=>setSelDay(iso)}>
+              <span className="cn">{d.getDate()}</span>
+              {list.slice(0, 3).map(({ s: x, w }) => (
+                <div key={x.id} className={"cchip" + (x.done ? ' done' : '') + (ghost && drag.current && drag.current.sid === x.id ? ' lift' : '')}
+                     style={{ '--c': DISC[x.discipline].color }} onPointerDown={(e)=>onChipDown(e, w, x, iso)} onContextMenu={(e)=>e.preventDefault()}>
+                  {chipLabel(x, templates)}
                 </div>
-              </div>
+              ))}
+              {list.length > 3 && <span className="more">+{list.length - 3}</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      <h2 className="daytitle" style={{ marginTop: 22 }}>{longDate(parse(selDay))}</h2>
+      {dayList.length === 0 && <p className="rest" style={{ marginBottom: 10 }}>Rien de prévu.</p>}
+      {dayList.map(({ s: x, w }) => (
+        <div key={x.id} className={"srow" + (x.done ? ' done' : '')} style={{ '--c': DISC[x.discipline].color }}>
+          <div className="m">
+            <button className="t" onClick={()=>onEdit(w, x.id)} aria-label={'Modifier : ' + x.desc}>
+              <b>{chipLabel(x, templates)}</b>
+              <span>{x.desc}</span>
+              {x.target && <em>{x.target}</em>}
+            </button>
+            {x.templateId && templates.some(t => t.id === x.templateId) && (
+              <button className="openlink" onClick={()=>onOpenMuscu(x.templateId, { wIdx: w, sid: x.id })}>Voir les exercices</button>
             )}
           </div>
-        );
-      })}
-      <button className="btn full" style={{marginTop:6}} onClick={onAddWeek}>+ Ajouter une semaine</button>
+          <button className="mini" aria-label={x.done ? 'Marquer comme non faite' : 'Marquer comme faite'} aria-pressed={x.done} onClick={()=>onToggle(w, x.id)}>
+            <span className="c"><Icon name="check" size={15} sw={3} /></span>
+          </button>
+        </div>
+      ))}
+      <div className="fabwrap"><div className="fabin">
+        <button className="fab" onClick={()=>onAdd(selDay)}><Icon name="plus" size={20} sw={2.4} /> Séance</button>
+      </div></div>
+
+      {ghost && <div className="cghost" style={{ left: ghost.x, top: ghost.y, '--c': ghost.color }}>{ghost.label}</div>}
     </div>
   );
 }
@@ -849,6 +986,7 @@ function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }){
   const set = (k, v) => setF(prev => ({...prev, [k]: v}));
   const save = () => {
     if(!f.desc.trim()){ setErr('Ajoute une description.'); return; }
+    if(!f.date){ setErr('Choisis une date.'); return; }
     onSave({ ...f, desc: f.desc.trim(), target: f.target.trim() });
   };
   return (
@@ -867,12 +1005,8 @@ function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }){
           </div>
         </div>
       )}
-      <label className="f">Jour</label>
-      <div className="daypick" role="radiogroup" aria-label="Jour">
-        {DAYS_LETTER.map((l, i) => (
-          <button key={i} role="radio" aria-checked={f.day===i} aria-label={DAYS_LONG[i]} className={"chip"+(f.day===i?" on":"")} onClick={()=>set('day', i)}>{l}</button>
-        ))}
-      </div>
+      <label className="f" htmlFor="s-date">Date</label>
+      <input id="s-date" type="date" value={f.date} onChange={(e)=>{ set('date', e.target.value); setErr(''); }} />
       <label className="f" htmlFor="s-desc">Description</label>
       <input id="s-desc" value={f.desc} placeholder="Sortie longue Z2" onChange={(e)=>{ set('desc', e.target.value); setErr(''); }} />
       <label className="f" htmlFor="s-tgt">Objectif</label>
@@ -1004,15 +1138,16 @@ function FinishSheet({ title, date, onSave, onClose }){
 }
 
 /* ---------- Réglages ---------- */
-function Settings({ profile, setProfile, onBack, onReset, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
+function Settings({ profile, setProfile, onBack, onReset, onLoadPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
   const [f, setF] = useState(profile);
   const [saved, setSaved] = useState(false);
   const fileRef = useRef(null);
   const set = (k, v) => { setF(prev => ({...prev, [k]: v})); setSaved(false); };
   const num = (k) => ({ type:'number', inputMode:'numeric', value:f[k], onChange:(e)=>set(k, e.target.value) });
+  const zonesNum = () => f.zones.map(z => z.map(v => v === '' ? 0 : Number(v)));
+  const setZone = (i, j, v) => { setF(prev => ({ ...prev, zones: prev.zones.map((z, k) => k !== i ? z : z.map((x, m) => m === j ? v : x)) })); setSaved(false); };
   const save = () => {
-    const n = (k) => f[k] === '' ? '' : Number(f[k]);
-    setProfile({ ...f, maxHR:n('maxHR'), z2Low:n('z2Low'), z2High:n('z2High'), raceZoneLow:n('raceZoneLow'), raceZoneHigh:n('raceZoneHigh') });
+    setProfile({ ...f, maxHR: f.maxHR === '' ? '' : Number(f.maxHR), zones: zonesNum() });
     setSaved(true);
   };
   const exportData = () => {
@@ -1045,23 +1180,28 @@ function Settings({ profile, setProfile, onBack, onReset, getData, onImport, icu
       <IcuSettings conn={icuConn} icu={icu} onConnect={onConnectIcu} onDisconnect={onDisconnectIcu} onRefresh={onRefreshIcu} />
 
       <div className="card">
-        <h3>Objectif</h3>
-        <label className="f" htmlFor="r-race">Date de l'Ironman 70.3</label>
-        <input id="r-race" type="date" value={f.ironmanDate} onChange={(e)=>set('ironmanDate', e.target.value)} />
+        <h3>Plan</h3>
         <label className="f" htmlFor="r-start">Début du plan (semaine 1)</label>
         <input id="r-start" type="date" value={f.programStart} onChange={(e)=>set('programStart', e.target.value)} />
+        <p className="note" style={{marginTop:14}}>Remplace le calendrier par le programme type de 12 semaines (course, vélo, natation et tes 4 séances de muscu), avec les zones de fréquence cardiaque ci-dessous. Les séances déjà enregistrées restent dans l'historique.</p>
+        <div className="actions">
+          <button className="btn ghost" onClick={()=>{ const st = onLoadPlan(zonesNum()); if(st) set('programStart', st); }}>Recharger le programme type</button>
+        </div>
       </div>
 
       <div className="card">
         <h3>Fréquence cardiaque</h3>
-        <div className="grid2">
-          <div><label className="f" htmlFor="r-max">FC max</label><input id="r-max" {...num('maxHR')} /></div>
-          <div></div>
-          <div><label className="f" htmlFor="r-z2l">Zone 2 · bas</label><input id="r-z2l" {...num('z2Low')} /></div>
-          <div><label className="f" htmlFor="r-z2h">Zone 2 · haut</label><input id="r-z2h" {...num('z2High')} /></div>
-          <div><label className="f" htmlFor="r-rl">Course · bas</label><input id="r-rl" {...num('raceZoneLow')} /></div>
-          <div><label className="f" htmlFor="r-rh">Course · haut</label><input id="r-rh" {...num('raceZoneHigh')} /></div>
-        </div>
+        <label className="f" htmlFor="r-max">FC max</label>
+        <input id="r-max" {...num('maxHR')} />
+        {f.zones.map((z, i) => (
+          <div key={i}>
+            <label className="f">Zone {i + 1}</label>
+            <div className="grid2">
+              <input type="number" inputMode="numeric" aria-label={'Zone ' + (i + 1) + ' : bas'} value={z[0]} onChange={(e)=>setZone(i, 0, e.target.value)} />
+              <input type="number" inputMode="numeric" aria-label={'Zone ' + (i + 1) + ' : haut'} value={z[1]} onChange={(e)=>setZone(i, 1, e.target.value)} />
+            </div>
+          </div>
+        ))}
       </div>
 
       <div className="actions" style={{marginTop:18}}>
@@ -1091,13 +1231,15 @@ function Settings({ profile, setProfile, onBack, onReset, getData, onImport, icu
 
 /* ---------- application ---------- */
 function App(){
-  const init = useRef(loadState()).current;
+  const initRef = useRef(null);
+  if(initRef.current === null) initRef.current = bootState();
+  const init = initRef.current;
   const [page, setPage] = useState('today');
   const [prevPage, setPrevPage] = useState('today');
-  const [workouts, setWorkouts] = useState(init && init.workouts || []);
-  const [program, setProgram] = useState(init && init.program || defaultProgram());
-  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(init && init.profile || {}) });
-  const [templates, setTemplates] = useState(init && init.templates || defaultTemplates());
+  const [workouts, setWorkouts] = useState(init.workouts || []);
+  const [program, setProgram] = useState(init.program);
+  const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(init.profile || {}) });
+  const [templates, setTemplates] = useState(init.templates);
   const [muscuView, setMuscuView] = useState(null);
   const [icuConn, setIcuConn] = useState(() => loadIcuConn() || (window.ALLURE_DEMO ? { apiKey: 'demo' } : null));
   const emptyIcu = { status: 'idle', activities: [], wellness: [], stubs: 0, fetchedAt: null, from: '' };
@@ -1106,7 +1248,7 @@ function App(){
   const [sel, setSel] = useState(fmt(new Date()));
   const [sheet, setSheet] = useState(null);
 
-  useEffect(()=>{ saveState({ workouts, program, profile, templates }); }, [workouts, program, profile, templates]);
+  useEffect(()=>{ saveState({ workouts, program, profile, templates, planVersion: PLAN_VERSION }); }, [workouts, program, profile, templates]);
   useEffect(()=>{ try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){} }, []);
   // si l'appli reste ouverte d'un jour à l'autre
   useEffect(()=>{
@@ -1206,12 +1348,32 @@ function App(){
     if(w.sessionId) setProgram(program.map(wk => ({ ...wk, sessions: wk.sessions.map(s => s.id===w.sessionId ? { ...s, done:false } : s) })));
   };
 
+  // déplace une séance vers une date (crée les semaines manquantes) et applique d'éventuelles modifications
+  const placeSession = (wIdx, sid, iso, fields) => {
+    const loc = locateWeek(program, profile.programStart, iso);
+    const fw = wIdx + loc.shift;
+    const old = loc.program[fw] && loc.program[fw].sessions.find(x => x.id === sid);
+    if(!old) return;
+    const moved = { ...old, ...(fields || {}), day: loc.day };
+    const prog = loc.program.map((w, i) => {
+      let ss = w.sessions;
+      if(i === fw) ss = ss.filter(x => x.id !== sid);
+      if(i === loc.wIdx) ss = [...ss, moved];
+      return ss === w.sessions ? w : { ...w, sessions: ss };
+    });
+    setProgram(prog);
+    if(loc.programStart !== profile.programStart) setProfile(p => ({ ...p, programStart: loc.programStart }));
+    setWorkouts(ws => ws.map(w => w.sessionId === sid ? { ...w, date: iso, ...(fields && fields.discipline ? { discipline: fields.discipline } : {}) } : w));
+  };
+
   const saveSession = (wIdx, sid, data) => {
+    const { date, ...fields } = data;
     if(sid){
-      setProgram(program.map((w,i) => i!==wIdx ? w : { ...w, sessions: w.sessions.map(s => s.id===sid ? { ...s, ...data } : s) }));
-      setWorkouts(workouts.map(w => w.sessionId===sid ? { ...w, discipline:data.discipline, date: fmt(addDays(weekStartFor(wIdx), data.day)) } : w));
+      placeSession(wIdx, sid, date, fields);
     } else {
-      setProgram(program.map((w,i) => i!==wIdx ? w : { ...w, sessions: [...w.sessions, { ...data, id: uid(), done:false }] }));
+      const loc = locateWeek(program, profile.programStart, date);
+      setProgram(loc.program.map((w, i) => i !== loc.wIdx ? w : { ...w, sessions: [...w.sessions, { ...fields, id: uid(), day: loc.day, done: false }] }));
+      if(loc.programStart !== profile.programStart) setProfile(p => ({ ...p, programStart: loc.programStart }));
     }
     setSheet(null);
   };
@@ -1222,24 +1384,26 @@ function App(){
     setSheet(null);
   };
 
-  const deleteWeek = (wIdx) => {
-    if(!confirm('Supprimer la semaine ' + (wIdx+1) + ' ?')) return;
-    const ids = new Set(program[wIdx].sessions.map(s => s.id));
-    setProgram(program.filter((_,i) => i !== wIdx));
-    setWorkouts(workouts.filter(w => !ids.has(w.sessionId)));
-  };
-
   const reset = () => {
     try{ localStorage.removeItem(KEY); }catch(e){}
-    setWorkouts([]); setProgram(defaultProgram()); setProfile({ ...DEFAULT_PROFILE, programStart: fmt(new Date()) }); setTemplates(defaultTemplates()); setMuscuView(null); clearIcu(); setIcuConn(null); setIcu({ ...emptyIcu }); go('today');
+    const tpls = defaultTemplates();
+    setWorkouts([]); setProgram(buildProgram(tpls, DEFAULT_PROFILE.zones)); setProfile({ ...DEFAULT_PROFILE, programStart: planStart() }); setTemplates(tpls); setMuscuView(null); clearIcu(); setIcuConn(null); setIcu({ ...emptyIcu }); go('today');
   };
   const importData = (d) => {
-    setWorkouts(d.workouts || []); setProgram(d.program || defaultProgram()); setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) }); setTemplates(d.templates || defaultTemplates());
+    const tpls = d.templates || defaultTemplates();
+    setWorkouts(d.workouts || []); setProgram(d.program || buildProgram(tpls, ((d.profile || {}).zones))); setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) }); setTemplates(tpls);
+  };
+  const loadPlan = (zones) => {
+    if(!confirm("Remplacer le calendrier par le programme type ? Les séances déjà enregistrées restent dans l'historique.")) return null;
+    const st = planStart();
+    setProgram(buildProgram(templates, zones || profile.zones)); setProfile(p => ({ ...p, programStart: st, ...(zones ? { zones } : {}) }));
+    setWorkouts(ws => ws.map(({ sessionId, ...w }) => w)); setSel(todayStr);
+    return st;
   };
 
   const tabs = [
     { id:'today', label:"Aujourd'hui", icon:'today' },
-    { id:'plan', label:'Plan', icon:'plan' },
+    { id:'plan', label:'Calendrier', icon:'plan' },
     { id:'muscu', label:'Muscu', icon:'muscu' },
     { id:'history', label:'Historique', icon:'history' },
   ];
@@ -1250,11 +1414,11 @@ function App(){
     <div>
       <main className="shell">
         {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} />}
-        {page==='plan' && <Plan program={program} profile={profile} todayStr={todayStr} onToggle={toggleSession}
+        {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} onToggle={toggleSession}
             onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })}
-            onAdd={(wIdx)=>setSheet({ type:'session', wIdx, sid:null })}
-            onAddWeek={()=>setProgram([...program, { id: uid(), sessions: [] }])}
-            onDeleteWeek={deleteWeek} onSettings={openSettings} />}
+            onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
+            onMove={(wIdx, sid, iso)=>placeSession(wIdx, sid, iso)}
+            onOpenMuscu={(id, from)=>openMuscu(id, from)} onSettings={openSettings} />}
         {page==='muscu' && !muscuView && <MuscuList templates={templates} onOpen={(id)=>openMuscu(id, null)} onNew={newTemplate} onSettings={openSettings} />}
         {page==='muscu' && muscuView && (() => {
           const t = templates.find(x => x.id === muscuView.templateId);
@@ -1264,7 +1428,7 @@ function App(){
                   onFinish={()=>setSheet({ type:'finish', templateId:t.id, from:muscuView.from })} />;
         })()}
         {page==='history' && <History workouts={workouts} onDelete={deleteWorkout} onSettings={openSettings} />}
-        {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onReset={reset}
+        {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onReset={reset} onLoadPlan={loadPlan}
             getData={()=>({ workouts, program, profile, templates })} onImport={importData}
             icuConn={icuConn} icu={icu} onConnectIcu={connectIcu} onDisconnectIcu={disconnectIcu} onRefreshIcu={()=>refreshIcu()} />}
       </main>
@@ -1293,7 +1457,7 @@ function App(){
       })()}
       {sheet && sheet.type==='session' && (() => {
         const s = sheet.sid ? program[sheet.wIdx].sessions.find(x => x.id === sheet.sid) : null;
-        const initial = s ? { discipline:s.discipline, day:s.day, desc:s.desc, target:s.target, templateId:s.templateId || '' } : { discipline:'course', day:0, desc:'', target:'', templateId:'' };
+        const initial = s ? { discipline:s.discipline, date: fmt(addDays(weekStartFor(sheet.wIdx), s.day)), desc:s.desc, target:s.target, templateId:s.templateId || '' } : { discipline:'course', date: sheet.date || todayStr, desc:'', target:'', templateId:'' };
         return <SessionSheet isNew={!s} initial={initial} templates={templates} onSave={(d)=>saveSession(sheet.wIdx, sheet.sid, d)} onDelete={()=>deleteSession(sheet.wIdx, sheet.sid)} onClose={()=>setSheet(null)} />;
       })()}
     </div>
