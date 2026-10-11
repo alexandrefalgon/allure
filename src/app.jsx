@@ -5,7 +5,7 @@ const DISC = {
   course: { short:'Course',   label:'Course à pied', color:'var(--run)'  },
   velo:   { short:'Vélo',     label:'Vélo',          color:'var(--bike)' },
   nage:   { short:'Natation', label:'Natation',      color:'var(--swim)' },
-  muscu:  { short:'Muscu',    label:'Musculation',   color:'var(--str)'  },
+  muscu:  { short:'Musculation', label:'Musculation',   color:'var(--str)'  },
   autre:  { short:'Activité', label:'Autre',         color:'var(--ink2)' },
 };
 const DISC_IDS = ['course','velo','nage','muscu'];
@@ -86,12 +86,12 @@ function buildProgram(templates, zones){
     const swolf = dl || i === 11 ? '' : ' · SWOLF visé ≤ ' + [38, 37, 36][blk];
     return { id: uid(), sessions: [
       S('course', 0, 'Footing très facile ' + z1(1), dur(P_RUN_EASY[i])),
-      S('muscu', 0, 'Push : poussée', dur(60) + muscuT, tid('Push force')),
-      S('muscu', 1, 'Pull : tirage', dur(60) + muscuT, tid('Pull force')),
+      S('muscu', 0, MUSCLES.Push, dur(60) + muscuT, tid('Push force')),
+      S('muscu', 1, MUSCLES.Pull, dur(60) + muscuT, tid('Pull force')),
       S('course', 2, P_RUN_Q[i] + (qZone[i] ? ' · efforts en ' + qZone[i] : ''), dur(P_RUN_Q_MIN[i]) + ' · échauffement 15 min, retour au calme 10 min'),
-      S('muscu', 3, 'Jambes : séance lourde', dur(65) + muscuT, tid('Jambes force')),
+      S('muscu', 3, MUSCLES.Jambes, dur(65) + muscuT, tid('Jambes force')),
       S('velo', 5, longDesc, dur(P_BIKE_LONG[i])),
-      S('muscu', 5, 'Rappel haut du corps : séance légère', dur(50) + muscuT, tid('Rappel haut du corps force')),
+      S('muscu', 5, MUSCLES.Rappel, dur(50) + muscuT, tid('Rappel haut du corps force')),
       S('nage', 6, 'Éducatifs 300 m + ' + P_SWIM[i] + swolf, dur(swimMin(P_SWIM_M[i])) + ' · ' + P_SWIM_M[i] + ' m'),
     ]};
   });
@@ -154,7 +154,9 @@ function loadState(){
 }
 function saveState(s){ try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){} }
 
-const PLAN_VERSION = 3;
+const PLAN_VERSION = 4;
+const MUSCLES = { Push: 'Pectoraux · épaules · triceps', Pull: 'Dos · biceps · arrière des épaules', Jambes: 'Quadriceps · ischio-jambiers · fessiers · mollets', Rappel: 'Pectoraux · dos · épaules · bras' };
+const muscleDesc = (d) => { const m = /^(Push|Pull|Jambes|Rappel)\b/.exec(d || ''); return m ? MUSCLES[m[1]] : d; };
 // début du plan : le lundi de cette semaine si on est lundi ou mardi, sinon lundi prochain
 function planStart(){ const d = new Date(), dow = (d.getDay() + 6) % 7; return fmt(dow <= 1 ? addDays(d, -dow) : addDays(d, 7 - dow)); }
 function bootState(){
@@ -164,6 +166,10 @@ function bootState(){
     return { workouts: [], templates, program: buildProgram(templates, DEFAULT_PROFILE.zones), profile: { ...DEFAULT_PROFILE, programStart: planStart() }, planVersion: PLAN_VERSION };
   }
   if(init.planVersion === PLAN_VERSION) return init;
+  if(init.planVersion === 3){
+    // seule la description des séances de musculation change : le calendrier de l'utilisateur est conservé
+    return { ...init, planVersion: PLAN_VERSION, program: (init.program || []).map(w => ({ ...w, sessions: w.sessions.map(x => x.discipline === 'muscu' ? { ...x, desc: muscleDesc(x.desc) } : x) })) };
+  }
   // ancien plan (préparation triathlon) → nouveau programme ; l'historique des séances est conservé
   const templates = init.templates && init.templates.length ? init.templates : defaultTemplates();
   const { ironmanDate, z2Low, z2High, raceZoneLow, raceZoneHigh, ...prof } = init.profile || {};
@@ -185,16 +191,16 @@ function locateWeek(program, programStart, iso){
 
 /* ---------- Intervals.icu ---------- */
 const ICU_CONN_KEY = 'allure_icu_conn_v1';
-const ICU_CACHE_KEY = 'allure_icu_cache_v2';
+const ICU_CACHE_KEY = 'allure_icu_cache_v3';
 const loadIcuConn = () => { try{ const r = localStorage.getItem(ICU_CONN_KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } };
 const saveIcuConn = (c) => { try{ localStorage.setItem(ICU_CONN_KEY, JSON.stringify(c)); }catch(e){} };
 const loadIcuCache = () => { try{ const r = localStorage.getItem(ICU_CACHE_KEY); return r ? JSON.parse(r) : null; }catch(e){ return null; } };
 const saveIcuCache = (c) => { try{ localStorage.setItem(ICU_CACHE_KEY, JSON.stringify(c)); }catch(e){} };
-const clearIcu = () => { try{ localStorage.removeItem(ICU_CONN_KEY); localStorage.removeItem(ICU_CACHE_KEY); localStorage.removeItem('allure_icu_cache_v1'); }catch(e){} };
+const clearIcu = () => { try{ localStorage.removeItem(ICU_CONN_KEY); localStorage.removeItem(ICU_CACHE_KEY); localStorage.removeItem('allure_icu_cache_v1'); localStorage.removeItem('allure_icu_cache_v2'); }catch(e){} };
 const ACT_FIELDS = 'id,name,type,start_date_local,moving_time,elapsed_time,distance,total_elevation_gain,source';
 
 // premier jour du mois précédent : on charge deux mois pour comparer
-const rangeFrom = (todayStr) => { const t = parse(todayStr); return fmt(new Date(t.getFullYear(), t.getMonth() - 1, 1)); };
+const rangeFrom = (todayStr) => { const t = parse(todayStr); return fmt(new Date(t.getFullYear(), t.getMonth() - 5, 1)); };
 
 function icuKind(type){
   const t = String(type || '');
@@ -242,8 +248,8 @@ function demoActivities(from, todayStr){
 }
 function demoWellness(todayStr){
   const out = [];
-  for(let i = 13; i >= 0; i--){
-    out.push({ id: fmt(addDays(parse(todayStr), -i)), ctl: 17 + (13 - i) * 0.25, atl: 13 + ((13 - i) % 5) * 1.7,
+  for(let i = 89; i >= 0; i--){
+    out.push({ id: fmt(addDays(parse(todayStr), -i)), ctl: 17 + (89 - i) * 0.1, atl: 13 + ((89 - i) % 5) * 1.7,
       sleepSecs: Math.round((6.4 + ((i * 7) % 11) / 10) * 3600), restingHR: 52 + (i % 3), hrv: 58 + (i * 5) % 14,
       steps: i === 0 ? 6480 : 5000 + (i * 1337) % 6000 });
   }
@@ -266,7 +272,7 @@ async function fetchIcuAll(apiKey, from, todayStr){
   if(Array.isArray(acts) && acts.length && acts.every(a => !a.start_date_local)) acts = await icuGet(apiKey, base);
   let wellness = [];
   // le bien-être est facultatif : une erreur ici ne doit pas bloquer le reste
-  try{ wellness = await icuGet(apiKey, 'wellness.json?oldest=' + fmt(addDays(parse(todayStr), -13)) + '&newest=' + todayStr); }
+  try{ wellness = await icuGet(apiKey, 'wellness.json?oldest=' + fmt(addDays(parse(todayStr), -89)) + '&newest=' + todayStr); }
   catch(e){ wellness = []; }
   return { activities: Array.isArray(acts) ? acts : [], wellness: Array.isArray(wellness) ? wellness : [] };
 }
@@ -488,9 +494,10 @@ function Spark({ values, bars, min0 }){
   );
 }
 
-function Card({ title, sub, wide, children }){
+function Card({ title, sub, wide, onClick, children }){
+  const tap = onClick ? { role: 'button', tabIndex: 0, onClick, onKeyDown: (e) => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); onClick(); } } } : {};
   return (
-    <section className={"wd" + (wide ? " wide" : "")}>
+    <section className={"wd" + (wide ? " wide" : "") + (onClick ? " tap" : "")} {...tap}>
       <h3>{title}</h3>
       {sub && <p className="s">{sub}</p>}
       {children}
@@ -498,8 +505,284 @@ function Card({ title, sub, wide, children }){
   );
 }
 
+
+/* ---------- Historique des cartes du tableau de bord ---------- */
+function monthKeys(todayStr, n){
+  const t = parse(todayStr);
+  return Array.from({ length: n }, (_, i) => {
+    const d = new Date(t.getFullYear(), t.getMonth() - (n - 1 - i), 1);
+    return { key: d.getFullYear() + '-' + pad(d.getMonth() + 1), label: MONTHS[d.getMonth()].replace('.', ''), long: MONTHS_LONG[d.getMonth()] + ' ' + d.getFullYear(), days: new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate() };
+  });
+}
+const bySport = (l) => KIND_ORDER.map(k => ({ kind: k, secs: sumBy(l.filter(a => a.kind === k), a => a.secs), meters: sumBy(l.filter(a => a.kind === k), a => a.meters) })).filter(x => x.secs > 0);
+function aggMonths(acts, todayStr){
+  return monthKeys(todayStr, 6).map(m => {
+    const l = acts.filter(a => a.date.slice(0, 7) === m.key);
+    return { ...m, secs: sumBy(l, a => a.secs), meters: sumBy(l, a => a.meters), count: l.length, active: new Set(l.map(a => a.date)).size, sports: bySport(l) };
+  });
+}
+function aggWeeks(acts, todayStr){
+  const ws = startOfWeek(parse(todayStr));
+  return Array.from({ length: 12 }, (_, i) => {
+    const s = addDays(ws, -7 * (11 - i)), a = fmt(s), b = fmt(addDays(s, 6));
+    const l = acts.filter(x => x.date >= a && x.date <= b);
+    return { key: a, label: String(s.getDate()), long: 'Semaine du ' + shortDate(s), secs: sumBy(l, x => x.secs), meters: sumBy(l, x => x.meters), count: l.length, active: new Set(l.map(x => x.date)).size, sports: bySport(l) };
+  });
+}
+const kmStr = (m) => fmtKm(m) + ' km';
+
+function BarChart({ items, sel, onSel }){
+  const W = 320, H = 150, T = 10, B = 22, n = items.length, gap = n > 8 ? 6 : 12, bw = (W - gap * (n - 1)) / n;
+  const max = Math.max(1, ...items.map(i => i.total));
+  return (
+    <svg className="hist-svg" viewBox={'0 0 ' + W + ' ' + H} role="img" aria-label="Historique">
+      <line x1="0" y1={H - B} x2={W} y2={H - B} style={{ stroke: 'var(--line)' }} strokeWidth="1" />
+      {items.map((it, k) => {
+        const x = k * (bw + gap); let y = H - B;
+        return (
+          <g key={it.key} onClick={() => onSel(k)} style={{ cursor: 'pointer' }} opacity={sel === k ? 1 : .5}>
+            <rect x={x - gap / 2} y="0" width={bw + gap} height={H} fill="transparent" />
+            {it.total === 0
+              ? <rect x={x} y={H - B - 2} width={bw} height="2" rx="1" style={{ fill: 'var(--line)' }} />
+              : it.segs.map((sg, j) => { const h = Math.max(2, (sg.v / max) * (H - T - B)); y -= h; return <rect key={j} x={x} y={y} width={bw} height={h} rx="3" style={{ fill: sg.color }} />; })}
+            <text x={x + bw / 2} y={H - 7} textAnchor="middle" style={{ fontWeight: sel === k ? 700 : 400 }}>{it.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function TrendChart({ pts, fmtV }){
+  const W = 320, H = 150, L = 8, R = 8, T = 14, B = 22;
+  const [hi, setHi] = useState(null);
+  const idxs = pts.map((p, i) => p.v != null ? i : -1).filter(i => i >= 0);
+  if(idxs.length === 0) return <p className="empty" style={{ margin: '24px 0' }}>Pas encore de données sur cette période.</p>;
+  const vals = idxs.map(i => pts[i].v);
+  let lo = Math.min(...vals), up = Math.max(...vals);
+  const margin = (up - lo) * 0.15 || Math.abs(up) * 0.05 || 1; lo -= margin; up += margin;
+  const X = (i) => L + (pts.length > 1 ? i / (pts.length - 1) : .5) * (W - L - R);
+  const Y = (v) => T + (1 - (v - lo) / (up - lo)) * (H - T - B);
+  const d = idxs.map((i, k) => (k ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(pts[i].v).toFixed(1)).join(' ');
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const sel = hi != null ? hi : idxs[idxs.length - 1];
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W;
+    let best = idxs[0], bd = 1e9;
+    idxs.forEach(i => { const dd = Math.abs(X(i) - x); if(dd < bd){ bd = dd; best = i; } });
+    setHi(best);
+  };
+  return (
+    <div>
+      <div className="hist-read"><b>{fmtV(pts[sel].v)}</b><span>{pts[sel].label}</span></div>
+      <svg className="hist-svg" viewBox={'0 0 ' + W + ' ' + H} role="img" aria-label="Évolution" onPointerDown={onMove} onPointerMove={onMove}>
+        <line x1={L} y1={H - B} x2={W - R} y2={H - B} style={{ stroke: 'var(--line)' }} strokeWidth="1" />
+        <line x1={L} y1={Y(avg)} x2={W - R} y2={Y(avg)} style={{ stroke: 'var(--ink2)' }} strokeWidth="1" strokeDasharray="3 4" opacity=".6" />
+        <path d={d} fill="none" style={{ stroke: 'var(--ink)' }} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+        {idxs.length <= 40 && idxs.map(i => <circle key={i} cx={X(i)} cy={Y(pts[i].v)} r="2.6" style={{ fill: 'var(--ink)' }} />)}
+        <line x1={X(sel)} y1={T - 4} x2={X(sel)} y2={H - B} style={{ stroke: 'var(--ink2)' }} strokeWidth="1" opacity=".5" />
+        <circle cx={X(sel)} cy={Y(pts[sel].v)} r="5" style={{ fill: 'var(--ink)', stroke: 'var(--card)' }} strokeWidth="2" />
+        <text x={L} y={H - 6}>{pts[0].short || pts[0].label}</text>
+        <text x={W - R} y={H - 6} textAnchor="end">{pts[pts.length - 1].short || pts[pts.length - 1].label}</text>
+      </svg>
+      <p className="hist-hint">Ligne pointillée : moyenne de la période ({fmtV(avg)}). Glisse le doigt sur la courbe pour lire chaque valeur.</p>
+    </div>
+  );
+}
+
+const WELL = {
+  sleep: { title: 'Sommeil', f: (v) => fmtMin(Math.round(v / 60)) },
+  rhr: { title: 'FC au repos', f: (v) => Math.round(v) + ' bpm' },
+  hrv: { title: 'VFC', f: (v) => Math.round(v) + ' ms' },
+  steps: { title: 'Pas', f: (v) => Math.round(v).toLocaleString('fr-FR') },
+};
+const BAR_TITLES = { month: 'Durée par mois', week: 'Durée par semaine', cal: "Jours d'activité", sports: 'Activité par sport' };
+
+function HistorySheet({ kind, icu, todayStr, onClose }){
+  const w = WELL[kind];
+  const [range, setRange] = useState(30);
+  const [selIdx, setSelIdx] = useState(null);
+  const months = useMemo(() => aggMonths(icu.activities, todayStr), [icu, todayStr]);
+  const weeks = useMemo(() => aggWeeks(icu.activities, todayStr), [icu, todayStr]);
+
+  if(w){
+    const byDate = {}; (icu.wellness || []).forEach(x => { byDate[x.date] = x; });
+    const t = parse(todayStr);
+    const pts = Array.from({ length: range }, (_, i) => {
+      const dt = addDays(t, -(range - 1 - i)), x = byDate[fmt(dt)];
+      return { label: longDate(dt), short: shortDate(dt), v: x && x[kind] ? x[kind] : null };
+    });
+    const real = pts.filter(p => p.v != null).map(p => p.v);
+    const last7 = pts.slice(-7).filter(p => p.v != null).map(p => p.v);
+    const mean = (a) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+    const stat = (label, v) => <div><b>{v == null ? '–' : w.f(v)}</b><span>{label}</span></div>;
+    return (
+      <Sheet title={w.title} onClose={onClose}>
+        <div className="seg" role="tablist" aria-label="Période">
+          {[30, 90].map(r => <button key={r} role="tab" aria-selected={range === r} className={range === r ? 'on' : ''} onClick={() => setRange(r)}>{r} jours</button>)}
+        </div>
+        <TrendChart key={kind + range} pts={pts} fmtV={w.f} />
+        <div className="hist-stats">
+          {stat('Moy. 7 jours', mean(last7))}
+          {stat('Moy. ' + range + ' j', mean(real))}
+          {stat('Min', real.length ? Math.min(...real) : null)}
+          {stat('Max', real.length ? Math.max(...real) : null)}
+          {stat('Dernière', real.length ? real[real.length - 1] : null)}
+          <div><b>{real.length}</b><span>jours renseignés</span></div>
+        </div>
+      </Sheet>
+    );
+  }
+
+  const list = kind === 'week' ? weeks : months;
+  const idx = selIdx == null ? list.length - 1 : selIdx;
+  const cur = list[idx];
+  let items;
+  if(kind === 'cal') items = list.map(m => ({ key: m.key, label: m.label, total: m.active, segs: [{ v: m.active, color: 'var(--ink)' }] }));
+  else if(kind === 'sports' || kind === 'week') items = list.map(m => ({ key: m.key, label: m.label, total: m.secs, segs: m.sports.map(s => ({ v: s.secs, color: (DISC[s.kind] || DISC.autre).color })) }));
+  else items = list.map(m => ({ key: m.key, label: m.label, total: m.secs, segs: [{ v: m.secs, color: 'var(--ink)' }] }));
+  const head = kind === 'cal' ? cur.active + (cur.active > 1 ? ' jours actifs' : ' jour actif') : fmtMin(Math.round(cur.secs / 60));
+  const count = cur.count + (cur.count > 1 ? ' activités' : ' activité');
+  const subline = kind === 'cal' ? 'sur ' + cur.days + ' jours · ' + cur.long : (cur.long || '') + ' · ' + count + (cur.meters ? ' · ' + kmStr(cur.meters) : '');
+  return (
+    <Sheet title={BAR_TITLES[kind]} onClose={onClose}>
+      <div className="hist-read"><b>{head}</b><span>{subline}</span></div>
+      <BarChart items={items} sel={idx} onSel={setSelIdx} />
+      {(kind === 'sports' || kind === 'week') && (
+        <div className="hist-rows">
+          {cur.sports.length === 0 && <p className="empty" style={{ margin: '14px 0' }}>Aucune activité sur cette période.</p>}
+          {cur.sports.map(s => {
+            const dsc = DISC[s.kind] || DISC.autre;
+            return <div className="r" key={s.kind} style={{ '--c': dsc.color }}><span><i></i>{dsc.short}</span><span>{fmtMin(Math.round(s.secs / 60))}{s.meters ? ' · ' + (s.kind === 'nage' ? Math.round(s.meters) + ' m' : kmStr(s.meters)) : ''}</span></div>;
+          })}
+        </div>
+      )}
+      {(kind === 'month' || kind === 'cal') && (
+        <div className="hist-rows">
+          {[...list].reverse().map(m => (
+            <div className="r" key={m.key}><span style={{ textTransform: 'capitalize' }}>{m.long}</span><span>{kind === 'cal' ? m.active + ' j' : fmtMin(Math.round(m.secs / 60)) + (m.meters ? ' · ' + kmStr(m.meters) : '')}</span></div>
+          ))}
+        </div>
+      )}
+    </Sheet>
+  );
+}
+
+/* ---------- Fiche d'une activité Intervals.icu (carte floutée + tracé interactif) ---------- */
+async function icuFetch(apiKey, path){
+  let res;
+  try{ res = await fetch('https://intervals.icu/api/v1/' + path, { headers: { Authorization: 'Basic ' + btoa('API_KEY:' + apiKey), Accept: 'application/json' } }); }
+  catch(e){ throw { code: 'net' }; }
+  if(!res.ok) throw { code: res.status === 401 || res.status === 403 ? 'auth' : 'http' };
+  return res.json();
+}
+function parseRoute(streams){
+  let ll = null;
+  if(Array.isArray(streams)) ll = streams.find(s => s && s.type === 'latlng');
+  else if(streams && typeof streams === 'object') ll = streams.latlng || null;
+  if(!ll || !Array.isArray(ll.data) || !Array.isArray(ll.data2)) return [];
+  const pts = [];
+  for(let i = 0; i < ll.data.length; i++){
+    const la = ll.data[i], lo = ll.data2[i];
+    if(typeof la === 'number' && typeof lo === 'number' && (la !== 0 || lo !== 0)) pts.push([la, lo]);
+  }
+  const step = Math.ceil(pts.length / 1500);
+  return step > 1 ? pts.filter((_, i) => i % step === 0 || i === pts.length - 1) : pts;
+}
+function demoRoute(){
+  const pts = [];
+  for(let i = 0; i <= 140; i++){ const a = i / 140 * Math.PI * 2; pts.push([48.8300 + Math.sin(a) * 0.012 + Math.sin(a * 3) * 0.002, 2.3300 + Math.cos(a) * 0.018 + Math.cos(a * 2) * 0.003]); }
+  return pts;
+}
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#111';
+const clock = (secs) => { secs = Math.round(secs); const h = Math.floor(secs / 3600), m = Math.floor(secs % 3600 / 60), s = secs % 60; return h ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s); };
+const paceStr = (secs, meters, per) => { if(!secs || !meters) return '–'; const p = secs / meters * per; return Math.floor(p / 60) + "'" + pad(Math.round(p % 60) % 60) + '"'; };
+
+function actStats(act, d){
+  const secs = Number(d && d.moving_time) || act.secs, meters = Number(d && d.distance) || act.meters;
+  const out = [];
+  if(meters) out.push([act.kind === 'nage' ? Math.round(meters) + ' m' : fmtKm(meters) + ' km', 'Distance']);
+  out.push([clock(secs), 'Durée']);
+  if(meters && secs){
+    if(act.kind === 'course') out.push([paceStr(secs, meters, 1000) + '/km', 'Allure moyenne']);
+    else if(act.kind === 'nage') out.push([paceStr(secs, meters, 100) + '/100 m', 'Allure moyenne']);
+    else if(act.kind === 'velo') out.push([(meters / secs * 3.6).toFixed(1).replace('.', ',') + ' km/h', 'Vitesse moyenne']);
+  }
+  if(d && d.average_heartrate) out.push([Math.round(d.average_heartrate) + ' bpm', 'FC moyenne']);
+  if(d && d.max_heartrate) out.push([Math.round(d.max_heartrate) + ' bpm', 'FC max']);
+  const elev = Number(d && d.total_elevation_gain) || act.elev;
+  if(elev > 0 && (act.kind === 'course' || act.kind === 'velo')) out.push([Math.round(elev) + ' m', 'Dénivelé positif']);
+  if(d && d.calories) out.push([Math.round(d.calories) + ' kcal', 'Calories']);
+  if(d && d.icu_training_load) out.push([String(Math.round(d.icu_training_load)), "Charge d'entraînement"]);
+  return out;
+}
+
+function RouteMap({ points, color }){
+  const ref = useRef(null);
+  useEffect(() => {
+    if(!window.L || !ref.current || points.length < 2) return;
+    const L = window.L;
+    const map = L.map(ref.current, { zoomControl: true, scrollWheelZoom: true });
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+    const line = L.polyline(points, { color, weight: 5, opacity: .95, lineJoin: 'round' }).addTo(map);
+    L.circleMarker(points[0], { radius: 7, color: '#fff', weight: 2, fillColor: '#1a9850', fillOpacity: 1 }).addTo(map);
+    L.circleMarker(points[points.length - 1], { radius: 7, color: '#fff', weight: 2, fillColor: '#d73027', fillOpacity: 1 }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [26, 26] });
+    return () => map.remove();
+  }, [points]);
+  return <div ref={ref} className="routemap" role="application" aria-label="Carte du parcours, zoomable" />;
+}
+
+function ActivityModal({ act, conn, onClose }){
+  const [st, setSt] = useState({ status: 'loading', detail: null, route: [] });
+  const dsc = DISC[act.kind] || DISC.autre;
+  useEffect(() => {
+    const onKey = (e) => { if(e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, []);
+  useEffect(() => {
+    let off = false;
+    (async () => {
+      if(window.ALLURE_DEMO){
+        await new Promise(r => setTimeout(r, 300));
+        if(!off) setSt({ status: 'ok', detail: { average_heartrate: 152, max_heartrate: 171, calories: 540, icu_training_load: 62 }, route: act.kind === 'nage' ? [] : demoRoute() });
+        return;
+      }
+      let detail = null, route = [], failed = 0;
+      try{ detail = await icuFetch(conn.apiKey, 'activity/' + encodeURIComponent(act.id)); }catch(e){ failed++; }
+      try{ route = parseRoute(await icuFetch(conn.apiKey, 'activity/' + encodeURIComponent(act.id) + '/streams.json?types=latlng')); }catch(e){ failed++; }
+      if(!off) setSt({ status: failed === 2 ? 'error' : 'ok', detail, route });
+    })();
+    return () => { off = true; };
+  }, [act.id]);
+  const stats = actStats(act, st.detail);
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal-card" role="dialog" aria-modal="true" aria-label={act.name || dsc.short} onClick={(e) => e.stopPropagation()} style={{ '--c': dsc.color }}>
+        <div className="modal-head">
+          <div>
+            <p className="mk"><i></i>{dsc.short}</p>
+            <h2>{act.name || dsc.short}</h2>
+            <p className="ms">{longDate(parse(act.date))}{act.time ? ' · ' + act.time : ''}</p>
+          </div>
+          <button className="icon" aria-label="Fermer" onClick={onClose}><Icon name="close" /></button>
+        </div>
+        <div className="mstats">{stats.map(([v, k]) => <div key={k}><b>{v}</b><span>{k}</span></div>)}</div>
+        {st.status === 'loading' && <p className="mnote">Chargement du parcours…</p>}
+        {st.status === 'error' && <p className="mnote">Impossible de charger les détails. Vérifie ta connexion.</p>}
+        {st.status === 'ok' && st.route.length > 1 && <RouteMap points={st.route} color={cssVar('--' + ({ course: 'run', velo: 'bike', nage: 'swim', muscu: 'str' }[act.kind] || 'run'))} />}
+        {st.status === 'ok' && st.route.length <= 1 && <p className="mnote">Pas de tracé GPS pour cette activité.</p>}
+        {st.status === 'ok' && st.route.length > 1 && <p className="mnote small">Pince ou utilise + et − pour zoomer, glisse pour te déplacer.</p>}
+      </div>
+    </div>
+  );
+}
+
 function Dash({ icu, todayStr }){
   const D = useMemo(() => buildDash(icu, todayStr), [icu, todayStr]);
+  const [detail, setDetail] = useState(null);
   const maxSport = Math.max(1, ...D.sports.map(x => x.secs));
   const dayLabel = (x) => x && x.date === todayStr ? "Aujourd'hui" : (x ? shortDate(parse(x.date)) : '');
   const sleepMax = Math.max(8 * 3600, ...D.sleep.s.filter(Boolean));
@@ -507,14 +790,14 @@ function Dash({ icu, todayStr }){
     <div className="dash">
       <h2 className="dash-title">Tableau de bord</h2>
       <div className="wgrid">
-        <Card title="Durée" sub="Ce mois-ci">
+        <Card title="Durée" sub="Ce mois-ci" onClick={() => setDetail('month')}>
           <p className="num">{fmtHM(D.monthTotal)}</p>
           {D.hasPrev && <p className="delta">{signedMin(D.deltaDur)} vs {D.prevName}</p>}
           <LineChart a={D.cumThis} b={D.hasPrev ? D.cumPrev : []} />
           <div className="axis"><span>{D.d1}</span><span>{D.dd}</span></div>
         </Card>
 
-        <Card title={D.monthName.charAt(0).toUpperCase() + D.monthName.slice(1)} sub="Jours d'activité">
+        <Card title={D.monthName.charAt(0).toUpperCase() + D.monthName.slice(1)} sub="Jours d'activité" onClick={() => setDetail('cal')}>
           <div className="cal" role="img" aria-label="Calendrier des activités du mois">
             {DAYS_LETTER.map((l, i) => <span key={'h' + i}>{l}</span>)}
             {Array.from({ length: D.lead }).map((_, i) => <b key={'e' + i}></b>)}
@@ -527,7 +810,7 @@ function Dash({ icu, todayStr }){
         </Card>
 
         {D.sports.length > 0 && (
-          <Card title="Activité" sub="Ce mois-ci" wide>
+          <Card title="Activité" sub="Ce mois-ci" wide onClick={() => setDetail('sports')}>
             <div className="sports">
               {D.sports.map(x => (
                 <div className="sp" key={x.kind} style={{'--c': (DISC[x.kind] || DISC.autre).color}}>
@@ -543,39 +826,40 @@ function Dash({ icu, todayStr }){
           </Card>
         )}
 
-        <Card title="Durée" sub="7 derniers jours">
+        <Card title="Durée" sub="7 derniers jours" onClick={() => setDetail('week')}>
           <p className="num">{fmtHM(D.last7Total)}</p>
           <p className="delta">{signedMin(D.last7Total - D.prev7Total)} vs semaine préc.</p>
           <StackBars days={D.last7} />
         </Card>
 
         {D.sleep.last && (
-          <Card title="Sommeil" sub={dayLabel(D.sleep.last)}>
+          <Card title="Sommeil" sub={dayLabel(D.sleep.last)} onClick={() => setDetail('sleep')}>
             <p className="num">{fmtHM(D.sleep.last.sleep)}</p>
             <Spark values={D.sleep.s} bars min0={sleepMax} />
           </Card>
         )}
 
         {D.rhr.last && (
-          <Card title="FC au repos" sub={dayLabel(D.rhr.last)}>
+          <Card title="FC au repos" sub={dayLabel(D.rhr.last)} onClick={() => setDetail('rhr')}>
             <p className="num">{Math.round(D.rhr.last.rhr)}<span className="u">bpm</span></p>
             <Spark values={D.rhr.s} />
           </Card>
         )}
 
         {D.hrv.last && (
-          <Card title="VFC" sub={dayLabel(D.hrv.last)}>
+          <Card title="VFC" sub={dayLabel(D.hrv.last)} onClick={() => setDetail('hrv')}>
             <p className="num">{Math.round(D.hrv.last.hrv)}<span className="u">ms</span></p>
             <Spark values={D.hrv.s} />
           </Card>
         )}
 
         {D.steps && D.steps.date === todayStr && (
-          <Card title="Pas" sub="Aujourd'hui">
+          <Card title="Pas" sub="Aujourd'hui" onClick={() => setDetail('steps')}>
             <p className="num">{Math.round(D.steps.steps).toLocaleString('fr-FR')}</p>
           </Card>
         )}
       </div>
+      {detail && <HistorySheet kind={detail} icu={icu} todayStr={todayStr} onClose={() => setDetail(null)} />}
     </div>
   );
 }
@@ -621,6 +905,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
   const today = parse(todayStr);
   const [off, setOff] = useState(0);
   const touch = useRef(null);
+  const [openAct, setOpenAct] = useState(null);
   useEffect(() => { setOff(0); }, [todayStr]);
   const weekStart = addDays(startOfWeek(today), off * 7);
   const wIdx = Math.floor(diffDays(weekStart, startOfWeek(parse(profile.programStart))) / 7);
@@ -722,12 +1007,14 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
         {icuDay.map(a => {
           const dsc = DISC[a.kind] || DISC.autre;
           return (
-            <li key={a.id} className="item act" style={{'--c':dsc.color}}>
+            <li key={a.id} className="item act" style={{'--c':dsc.color}} role="button" tabIndex={0} aria-label={'Détails : ' + (a.name || dsc.short)}
+                onClick={()=>setOpenAct(a)} onKeyDown={(e)=>{ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setOpenAct(a); } }}>
               <div className="item-text">
                 <h3>{a.name || dsc.short}</h3>
                 <p className="desc">{fmtMin(Math.round(a.secs / 60))}{a.meters ? ' · ' + fmtKm(a.meters) + ' km' : ''}</p>
                 <p className="tag">{a.time ? a.time + ' · ' : ''}Intervals.icu</p>
               </div>
+              <span className="acthint"><Icon name="chevron" /></span>
             </li>
           );
         })}
@@ -737,6 +1024,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
       )}
       </div>
       {icuConn && icu.fetchedAt && <Dash icu={icu} todayStr={todayStr} />}
+      {openAct && icuConn && <ActivityModal act={openAct} conn={icuConn} onClose={()=>setOpenAct(null)} />}
     </div>
   );
 }
@@ -747,7 +1035,7 @@ function chipLabel(s, templates){
     const t = s.templateId && templates.find(x => x.id === s.templateId);
     if(t) return t.name.replace(/ force$/i, '').replace(/^Rappel haut du corps/i, 'Haut');
   }
-  return s.discipline === 'nage' ? 'Nage' : DISC[s.discipline].short;
+  return s.discipline === 'nage' ? 'Nage' : s.discipline === 'muscu' ? 'Muscu.' : DISC[s.discipline].short;
 }
 
 function Calendar({ program, profile, todayStr, templates, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }){
@@ -1026,11 +1314,95 @@ const countEx = (t) => t.blocks.reduce((n, b) => n + b.exercises.length, 0);
 const countSets = (t) => t.blocks.reduce((n, b) => n + b.exercises.reduce((m, e) => m + e.sets.length, 0), 0);
 const fmtSets = (sets) => sets.map(s => s.kg ? s.reps + ' × ' + s.kg + ' kg' : String(s.reps)).join(' · ');
 
-function MuscuList({ templates, onOpen, onNew, onSettings }){
+/* ---------- Journal de musculation : historique des charges et records ---------- */
+const fmtKg = (v) => String(Math.round(v * 10) / 10).replace('.', ',') + ' kg';
+function buildJournal(workouts){
+  const map = {};
+  workouts.filter(w => w.exercises && w.exercises.length).forEach(w => {
+    w.exercises.forEach(e => {
+      const sets = (e.sets || []).filter(s => s.reps > 0 || s.kg > 0);
+      if(!sets.length) return;
+      const top = sets.reduce((b, s) => (s.kg > b.kg || (s.kg === b.kg && s.reps > b.reps)) ? s : b, sets[0]);
+      (map[e.name] = map[e.name] || []).push({ date: w.date, sets, top, e1rm: Math.max(...sets.map(s => s.kg * (1 + s.reps / 30))), volume: sets.reduce((n, s) => n + s.kg * s.reps, 0) });
+    });
+  });
+  return Object.keys(map).map(name => {
+    const h = map[name].sort((a, b) => a.date.localeCompare(b.date));
+    const weighted = h.some(x => x.top.kg > 0);
+    const metric = (x) => weighted ? x.top.kg : x.top.reps;
+    let best = -1, prs = 0;
+    h.forEach((x, i) => { const v = metric(x); x.pr = i > 0 && v > best; if(x.pr) prs++; if(v > best) best = v; });
+    const prSession = h.filter(x => metric(x) === best).pop();
+    return { name, h, weighted, metric, best, prs, prSession, last: h[h.length - 1], e1rm: weighted ? Math.max(...h.map(x => x.e1rm)) : 0 };
+  }).sort((a, b) => b.last.date.localeCompare(a.last.date));
+}
+const topStr = (ex, x) => ex.weighted ? fmtKg(x.top.kg) + ' × ' + x.top.reps : x.top.reps + ' reps';
+
+function ExerciseSheet({ ex, onClose }){
+  const pts = ex.h.map(x => ({ label: longDate(parse(x.date)) + ' · ' + topStr(ex, x), short: shortDate(parse(x.date)), v: ex.metric(x) }));
+  const fmtV = (v) => ex.weighted ? fmtKg(v) : v + ' reps';
+  return (
+    <Sheet title={ex.name} onClose={onClose}>
+      <TrendChart pts={pts} fmtV={fmtV} />
+      <div className="hist-stats">
+        <div><b>{fmtV(ex.best)}</b><span>Record{ex.weighted ? ' (' + ex.prSession.top.reps + ' reps)' : ''}</span></div>
+        {ex.weighted && <div><b>{fmtKg(ex.e1rm)}</b><span>1RM estimé</span></div>}
+        <div><b>{ex.h.length}</b><span>{ex.h.length > 1 ? 'séances' : 'séance'}</span></div>
+      </div>
+      <div className="hist-rows">
+        {[...ex.h].reverse().map((x, i) => (
+          <div className="r col" key={i}>
+            <span><b>{shortDate(parse(x.date))}</b>{x.pr && <em className="prtag">Record</em>}</span>
+            <span className="sets">{fmtSets(x.sets)}</span>
+          </div>
+        ))}
+      </div>
+    </Sheet>
+  );
+}
+
+function MuscuJournal({ workouts }){
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(null);
+  const all = useMemo(() => buildJournal(workouts), [workouts]);
+  const list = all.filter(e => e.name.toLowerCase().includes(q.trim().toLowerCase()));
+  if(all.length === 0) return <p className="empty">Le journal se remplit quand tu termines une séance de musculation depuis l'onglet Séances : chaque exercice y garde l'historique de ses charges et tes records.</p>;
   return (
     <div>
-      <Header title="Muscu" sub={templates.length + (templates.length > 1 ? ' séances' : ' séance')} onSettings={onSettings} />
-      <div style={{height:20}}></div>
+      <input type="search" placeholder="Rechercher un exercice" aria-label="Rechercher un exercice" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 12 }} />
+      {list.length === 0 && <p className="empty">Aucun exercice ne correspond.</p>}
+      {list.map(ex => (
+        <button key={ex.name} className="tcard jr" onClick={() => setOpen(ex)}>
+          <div>
+            <h3>{ex.name}</h3>
+            <p>Dernière : {topStr(ex, ex.last)} · {shortDate(parse(ex.last.date))}</p>
+            <p>Record : <b>{ex.weighted ? fmtKg(ex.best) : ex.best + ' reps'}</b>{ex.weighted ? ' × ' + ex.prSession.top.reps : ''} · {ex.h.length} {ex.h.length > 1 ? 'séances' : 'séance'}</p>
+          </div>
+          <span className="go"><Icon name="chevron" /></span>
+        </button>
+      ))}
+      {open && <ExerciseSheet ex={open} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+function MuscuHome({ templates, workouts, onOpen, onNew, onSettings }){
+  const [tab, setTab] = useState('seances');
+  return (
+    <div>
+      <Header title="Musculation" sub={templates.length + (templates.length > 1 ? ' séances' : ' séance')} onSettings={onSettings} />
+      <div className="seg" role="tablist" aria-label="Musculation">
+        <button role="tab" aria-selected={tab === 'seances'} className={tab === 'seances' ? 'on' : ''} onClick={() => setTab('seances')}>Séances</button>
+        <button role="tab" aria-selected={tab === 'journal'} className={tab === 'journal' ? 'on' : ''} onClick={() => setTab('journal')}>Journal</button>
+      </div>
+      {tab === 'seances' ? <MuscuList templates={templates} onOpen={onOpen} onNew={onNew} /> : <MuscuJournal workouts={workouts} />}
+    </div>
+  );
+}
+
+function MuscuList({ templates, onOpen, onNew }){
+  return (
+    <div>
       {templates.map(t => (
         <button key={t.id} className="tcard" onClick={()=>onOpen(t.id)}>
           <div>
@@ -1104,7 +1476,7 @@ function MuscuDetail({ template, startEdit, onUpdate, onDelete, onBack, onFinish
       {edit && (
         <div>
           <button className="btn ghost full" onClick={addEx}>+ Exercice</button>
-          <div className="actions"><button className="btn warn" onClick={()=>{ if(confirm('Supprimer cette séance de muscu ?')) onDelete(); }}>Supprimer la séance</button></div>
+          <div className="actions"><button className="btn warn" onClick={()=>{ if(confirm('Supprimer cette séance de musculation ?')) onDelete(); }}>Supprimer la séance</button></div>
         </div>
       )}
       <div style={{height:96}}></div>
@@ -1183,7 +1555,7 @@ function Settings({ profile, setProfile, onBack, onReset, onLoadPlan, getData, o
         <h3>Plan</h3>
         <label className="f" htmlFor="r-start">Début du plan (semaine 1)</label>
         <input id="r-start" type="date" value={f.programStart} onChange={(e)=>set('programStart', e.target.value)} />
-        <p className="note" style={{marginTop:14}}>Remplace le calendrier par le programme type de 12 semaines (course, vélo, natation et tes 4 séances de muscu), avec les zones de fréquence cardiaque ci-dessous. Les séances déjà enregistrées restent dans l'historique.</p>
+        <p className="note" style={{marginTop:14}}>Remplace le calendrier par le programme type de 12 semaines (course, vélo, natation et tes 4 séances de musculation), avec les zones de fréquence cardiaque ci-dessous. Les séances déjà enregistrées restent dans l'historique.</p>
         <div className="actions">
           <button className="btn ghost" onClick={()=>{ const st = onLoadPlan(zonesNum()); if(st) set('programStart', st); }}>Recharger le programme type</button>
         </div>
@@ -1404,7 +1776,7 @@ function App(){
   const tabs = [
     { id:'today', label:"Aujourd'hui", icon:'today' },
     { id:'plan', label:'Calendrier', icon:'plan' },
-    { id:'muscu', label:'Muscu', icon:'muscu' },
+    { id:'muscu', label:'Musculation', icon:'muscu' },
     { id:'history', label:'Historique', icon:'history' },
   ];
   const onSettingsPage = page === 'settings';
@@ -1419,7 +1791,7 @@ function App(){
             onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
             onMove={(wIdx, sid, iso)=>placeSession(wIdx, sid, iso)}
             onOpenMuscu={(id, from)=>openMuscu(id, from)} onSettings={openSettings} />}
-        {page==='muscu' && !muscuView && <MuscuList templates={templates} onOpen={(id)=>openMuscu(id, null)} onNew={newTemplate} onSettings={openSettings} />}
+        {page==='muscu' && !muscuView && <MuscuHome templates={templates} workouts={workouts} onOpen={(id)=>openMuscu(id, null)} onNew={newTemplate} onSettings={openSettings} />}
         {page==='muscu' && muscuView && (() => {
           const t = templates.find(x => x.id === muscuView.templateId);
           if(!t) return null;

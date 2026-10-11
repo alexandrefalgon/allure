@@ -260,3 +260,52 @@ textarea{min-height:76px;resize:vertical;}
 .srow .t span{display:block;margin-top:4px;}
 .srow .t em{display:block;margin-top:2px;font-style:normal;color:var(--ink2);font-size:15px;}
 .srow.done .t{opacity:.55;}
+
+/* cartes cliquables + historique */
+.wd.tap{cursor:pointer;position:relative;-webkit-tap-highlight-color:transparent;}
+.wd.tap:active{background:var(--paper);}
+.wd.tap::after{content:'';position:absolute;top:17px;right:14px;width:7px;height:7px;border-top:2px solid var(--ink2);border-right:2px solid var(--ink2);transform:rotate(45deg);opacity:.7;}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--line);border-radius:12px;padding:3px;margin:18px 0 14px;}
+.seg button{height:38px;border-radius:10px;font-weight:600;color:var(--ink2);}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.12);}
+.hist-read{margin:12px 0 6px;min-height:50px;}
+.hist-read b{display:block;font:700 36px/1 var(--head);font-variant-numeric:tabular-nums;}
+.hist-read span{display:block;color:var(--ink2);font-size:14px;margin-top:4px;}
+.hist-read span::first-letter{text-transform:uppercase;}
+.hist-svg{display:block;width:100%;height:auto;touch-action:pan-y;user-select:none;-webkit-user-select:none;margin-top:6px;}
+.hist-svg text{fill:var(--ink2);font-size:10px;font-family:var(--body);}
+.hist-hint{color:var(--ink2);font-size:12.5px;margin-top:8px;}
+.hist-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0 8px;}
+.hist-stats div{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-width:0;}
+.hist-stats b{display:block;font:700 22px/1.05 var(--head);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.hist-stats span{color:var(--ink2);font-size:12.5px;}
+.hist-rows{margin-top:10px;}
+.hist-rows .r{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line);}
+.hist-rows .r i{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--c);margin-right:9px;}
+.hist-rows .r.col{flex-direction:column;align-items:flex-start;gap:3px;}
+.hist-rows .sets{color:var(--ink2);font-size:14.5px;}
+.prtag{font-style:normal;font-size:11.5px;font-weight:700;background:var(--ink);color:var(--paper);border-radius:6px;padding:2px 7px;margin-left:8px;}
+.tcard.jr h3{font:700 22px/1.1 var(--head);}
+.tcard.jr p{margin-top:3px;}
+
+/* fiche d'activité */
+.item.act{cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.item.act:active{background:var(--paper);}
+.acthint{width:44px;display:grid;place-items:center;color:var(--ink2);flex-shrink:0;}
+.acthint svg{transform:rotate(-90deg);}
+.modal-back{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(14,17,20,.38);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);animation:fadein .18s ease-out;}
+.modal-card{width:100%;max-width:440px;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow-y:auto;background:var(--card);border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.35);animation:popin .2s ease-out;border-top:6px solid var(--c);}
+.modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:16px 12px 0 20px;}
+.modal-head h2{font:700 30px/1.05 var(--head);}
+.modal-head .mk{display:flex;align-items:center;gap:7px;color:var(--ink2);font-size:13.5px;margin-bottom:5px;}
+.modal-head .mk i{width:10px;height:10px;border-radius:50%;background:var(--c);}
+.modal-head .ms{color:var(--ink2);font-size:14.5px;margin-top:4px;}
+.mstats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:16px 20px;}
+.mstats div{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:10px 10px 9px;min-width:0;}
+.mstats b{display:block;font:700 21px/1.05 var(--head);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.mstats span{color:var(--ink2);font-size:12px;line-height:1.2;display:block;margin-top:2px;}
+.mnote{color:var(--ink2);font-size:14.5px;padding:2px 20px 20px;}
+.mnote.small{font-size:12.5px;padding-top:0;margin-top:-10px;}
+.routemap{position:relative;z-index:0;height:290px;margin:0 20px 18px;border-radius:14px;overflow:hidden;border:1px solid var(--line);}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+@keyframes popin{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
