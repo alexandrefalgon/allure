@@ -33,7 +33,7 @@ h1{font:700 42px/1 var(--head);letter-spacing:-0.005em;}
 /* bande de la semaine */
 .weekbar{display:flex;justify-content:space-between;align-items:center;margin:26px 0 10px;}
 .weekbar>div:first-child{display:flex;flex-direction:column;gap:6px;}
-.swipe{touch-action:pan-y;min-height:55vh;}
+.swipe{touch-action:pan-y;min-height:30vh;}
 .wnav{display:flex;align-items:center;gap:2px;margin-right:-8px;}
 .wnav button{width:40px;height:40px;display:grid;place-items:center;border-radius:50%;color:var(--ink);}
 .wnav button:active{background:var(--line);}
@@ -74,8 +74,8 @@ h1{font:700 42px/1 var(--head);letter-spacing:-0.005em;}
 .fabin{max-width:520px;margin:0 auto;padding:0 20px;display:flex;justify-content:flex-end;}
 .fab{pointer-events:auto;height:52px;padding:0 22px 0 18px;display:inline-flex;align-items:center;gap:8px;border-radius:26px;background:var(--ink);color:var(--paper);font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.22);}
 .tabs{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding-bottom:var(--bot);z-index:30;}
-.tabsin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);}
-.tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:11px 0 10px;font-size:12.5px;color:var(--ink2);text-align:center;}
+.tabsin{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr);}
+.tab{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:11px 0 10px;font-size:11.5px;color:var(--ink2);text-align:center;}
 .tab.on{color:var(--ink);font-weight:600;}
 .tab.on::before{content:'';position:absolute;top:0;left:50%;width:30px;height:3px;margin-left:-15px;background:var(--ink);border-radius:0 0 3px 3px;}
 
@@ -309,3 +309,12 @@ textarea{min-height:76px;resize:vertical;}
 .routemap{position:relative;z-index:0;height:290px;margin:0 20px 18px;border-radius:14px;overflow:hidden;border:1px solid var(--line);}
 @keyframes fadein{from{opacity:0}to{opacity:1}}
 @keyframes popin{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:none}}
+
+/* onglet Carte + pas */
+.seg.three{grid-template-columns:repeat(3,1fr);margin-bottom:10px;}
+.bigmap{position:relative;z-index:0;height:calc(100vh - 400px);height:calc(100dvh - 400px);min-height:320px;border-radius:14px;overflow:hidden;border:1px solid var(--line);margin-top:6px;}
+.maplegend{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin:12px 2px 0;font-size:13.5px;}
+.maplegend span{display:inline-flex;align-items:center;gap:7px;font-weight:500;}
+.maplegend i{width:18px;height:5px;border-radius:3px;background:var(--c);}
+.maplegend em{font-style:normal;color:var(--ink2);flex-basis:100%;}
+.subh{font:700 24px/1 var(--head);margin:22px 0 2px;}

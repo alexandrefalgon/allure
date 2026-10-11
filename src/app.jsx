@@ -293,6 +293,7 @@ const PATHS = {
   settings:<><path d="M4 8h9M19 8h1M4 16h1M11 16h9"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/></>,
   muscu:   <path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>,
   plus:    <path d="M12 5v14M5 12h14"/>,
+  map:     <><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></>,
   check:   <path d="M5 12.5l4.5 4.5L19 7.5"/>,
   chevron: <path d="M6 9l6 6 6-6"/>,
   back:    <path d="M15 5l-7 7 7 7"/>,
@@ -594,7 +595,6 @@ const WELL = {
   sleep: { title: 'Sommeil', f: (v) => fmtMin(Math.round(v / 60)) },
   rhr: { title: 'FC au repos', f: (v) => Math.round(v) + ' bpm' },
   hrv: { title: 'VFC', f: (v) => Math.round(v) + ' ms' },
-  steps: { title: 'Pas', f: (v) => Math.round(v).toLocaleString('fr-FR') },
 };
 const BAR_TITLES = { month: 'Durée par mois', week: 'Durée par semaine', cal: "Jours d'activité", sports: 'Activité par sport' };
 
@@ -780,6 +780,209 @@ function ActivityModal({ act, conn, onClose }){
   );
 }
 
+
+/* ---------- Pas ---------- */
+function stepsMap(icu, manual){
+  const m = {};
+  (icu.wellness || []).forEach(w => { if(w.steps) m[w.date] = w.steps; });
+  Object.keys(manual || {}).forEach(k => { if(manual[k] > 0) m[k] = manual[k]; });
+  return m;
+}
+const nFr = (n) => Math.round(n).toLocaleString('fr-FR');
+
+function StepsSheet({ data, manual, todayStr, onSave, onClose }){
+  const [range, setRange] = useState(30);
+  const [date, setDate] = useState(todayStr);
+  const [val, setVal] = useState(data[todayStr] ? String(Math.round(data[todayStr])) : '');
+  const [msg, setMsg] = useState('');
+  const t = parse(todayStr);
+  const pts = Array.from({ length: range }, (_, i) => {
+    const dt = addDays(t, -(range - 1 - i));
+    return { label: longDate(dt), short: shortDate(dt), v: data[fmt(dt)] || null };
+  });
+  const real = pts.filter(p => p.v != null).map(p => p.v);
+  const last7 = pts.slice(-7).filter(p => p.v != null).map(p => p.v);
+  const mean = (a) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : null;
+  const stat = (label, v) => <div><b>{v == null ? '–' : nFr(v)}</b><span>{label}</span></div>;
+  const pickDate = (d) => { setDate(d); setMsg(''); setVal(data[d] ? String(Math.round(data[d])) : ''); };
+  const save = () => {
+    const n = Math.round(Number(String(val).replace(/\s/g, '')));
+    if(!(n > 0 && n <= 200000)){ setMsg('Indique un nombre de pas entre 1 et 200 000.'); return; }
+    onSave(date, n); setMsg('Enregistré ✓');
+  };
+  const remove = () => { onSave(date, 0); setVal(''); setMsg('Saisie supprimée.'); };
+  return (
+    <Sheet title="Pas" onClose={onClose}>
+      <div className="seg" role="tablist" aria-label="Période">
+        {[30, 90].map(r => <button key={r} role="tab" aria-selected={range === r} className={range === r ? 'on' : ''} onClick={() => setRange(r)}>{r} jours</button>)}
+      </div>
+      <TrendChart key={range + ':' + real.length + ':' + (real[real.length - 1] || 0)} pts={pts} fmtV={nFr} />
+      <div className="hist-stats">
+        {stat('Moy. 7 jours', mean(last7))}
+        {stat('Moy. ' + range + ' j', mean(real))}
+        {stat('Max', real.length ? Math.max(...real) : null)}
+      </div>
+      <h3 className="subh">Saisir mes pas</h3>
+      <div className="grid2">
+        <div><label className="f" htmlFor="st-date">Jour</label><input id="st-date" type="date" max={todayStr} value={date} onChange={(e) => pickDate(e.target.value)} /></div>
+        <div><label className="f" htmlFor="st-val">Pas</label><input id="st-val" type="number" inputMode="numeric" placeholder="8500" value={val} onChange={(e) => { setVal(e.target.value); setMsg(''); }} /></div>
+      </div>
+      {msg && <p className={msg.includes('Indique') ? 'err' : 'note'} role="status" style={{ marginTop: 10 }}>{msg}</p>}
+      <div className="actions">
+        <button className="btn" onClick={save}>Enregistrer</button>
+        {manual[date] > 0 && <button className="btn ghost" onClick={remove}>Supprimer</button>}
+      </div>
+      <p className="note" style={{ marginTop: 14 }}>Les pas envoyés par Intervals.icu s'affichent automatiquement. Une saisie manuelle les remplace pour le jour choisi.</p>
+    </Sheet>
+  );
+}
+
+/* ---------- Carte de tous les parcours ---------- */
+const ROUTE_KEY = 'allure_routes_v1';
+const ROUTES = (() => { try{ return JSON.parse(localStorage.getItem(ROUTE_KEY)) || {}; }catch(e){ return {}; } })();
+const saveRoutes = () => { try{ localStorage.setItem(ROUTE_KEY, JSON.stringify(ROUTES)); }catch(e){ /* stockage plein : les tracés seront rechargés */ } };
+const GPS_TYPE = /(run|ride|walk|hike|ski|kayak|row|canoe|paddle|snowboard|sail|surf)/i;
+const NO_GPS_TYPE = /(virtual|weight|strength|zwift|trainer|indoor|treadmill)/i;
+const hasGps = (a) => GPS_TYPE.test(a.type || '') && !NO_GPS_TYPE.test(a.type || '');
+
+function rdp(pts, eps){
+  const n = pts.length;
+  if(n < 3) return pts;
+  const keep = new Uint8Array(n); keep[0] = 1; keep[n - 1] = 1;
+  const stack = [[0, n - 1]];
+  while(stack.length){
+    const [a, b] = stack.pop();
+    const ax = pts[a][0], ay = pts[a][1], dx = pts[b][0] - ax, dy = pts[b][1] - ay, len2 = dx * dx + dy * dy;
+    let dmax = 0, idx = -1;
+    for(let i = a + 1; i < b; i++){
+      let t = len2 ? ((pts[i][0] - ax) * dx + (pts[i][1] - ay) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const ex = ax + t * dx - pts[i][0], ey = ay + t * dy - pts[i][1], d = ex * ex + ey * ey;
+      if(d > dmax){ dmax = d; idx = i; }
+    }
+    if(idx > 0 && dmax > eps * eps){ keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+  }
+  return pts.filter((_, i) => keep[i]);
+}
+function simplifyRoute(pts){
+  let out = pts, eps = 2e-5;
+  for(let k = 0; k < 6 && out.length > 450; k++){ out = rdp(pts, eps); eps *= 2; }
+  if(out === pts) out = rdp(pts, 2e-5);
+  return out.map(p => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
+}
+function demoRouteFor(id){
+  let k = 0; for(const ch of String(id)) k = (k * 31 + ch.charCodeAt(0)) % 9973;
+  const cy = 48.83 + ((k % 7) - 3) * 0.011, cx = 2.33 + (((k * 3) % 9) - 4) * 0.012, r = 0.006 + (k % 5) * 0.003;
+  return Array.from({ length: 121 }, (_, i) => { const a = i / 120 * Math.PI * 2; return [cy + Math.sin(a) * r + Math.sin(a * 3 + k) * r * .15, cx + Math.cos(a) * r * 1.4 + Math.cos(a * 2) * r * .2]; });
+}
+async function fetchRoute(apiKey, id){
+  if(window.ALLURE_DEMO){ await new Promise(r => setTimeout(r, 60)); return simplifyRoute(demoRouteFor(id)); }
+  let pts = [], ok = false;
+  try{
+    const m = await icuFetch(apiKey, 'activity/' + encodeURIComponent(id) + '/map');
+    ok = true;
+    pts = (m && Array.isArray(m.latlngs) ? m.latlngs : []).filter(p => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number' && (p[0] !== 0 || p[1] !== 0));
+  }catch(e){ if(e && e.code === 'auth') throw e; }
+  if(pts.length < 2){
+    try{ pts = parseRoute(await icuFetch(apiKey, 'activity/' + encodeURIComponent(id) + '/streams.json?types=latlng')); ok = true; }
+    catch(e){ if(e && e.code === 'auth') throw e; }
+  }
+  if(pts.length >= 2) return simplifyRoute(pts);
+  return ok ? null : undefined;   // null : pas de GPS (à retenir) · undefined : échec réseau (à retenter)
+}
+const ROUTE_FAMILY = { course: [8, 38], velo: [195, 40], autre: [110, 30] };
+const routeColor = (kind, i) => { const f = ROUTE_FAMILY[kind] || [270, 40]; return 'hsl(' + (f[0] + (i * 17) % f[1]) + ' 80% ' + (34 + (i * 11) % 22) + '%)'; };
+
+function RoutesMap({ items, fitKey, onPick }){
+  const ref = useRef(null), mapRef = useRef(null), layerRef = useRef(null), fitted = useRef(null);
+  const pick = useRef(onPick); pick.current = onPick;
+  useEffect(() => {
+    if(!window.L || !ref.current) return;
+    const L = window.L;
+    const map = L.map(ref.current, { zoomControl: true, scrollWheelZoom: true }).setView([46.6, 2.5], 5);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+    layerRef.current = L.layerGroup().addTo(map); mapRef.current = map;
+    return () => { map.remove(); mapRef.current = null; };
+  }, []);
+  useEffect(() => {
+    const L = window.L, map = mapRef.current, group = layerRef.current;
+    if(!L || !map || !group) return;
+    group.clearLayers();
+    const all = [];
+    items.forEach(it => {
+      const line = L.polyline(it.pts, { color: it.color, weight: 4, opacity: .9, lineJoin: 'round' }).addTo(group);
+      const hit = L.polyline(it.pts, { color: '#000', weight: 18, opacity: .01 }).addTo(group);
+      hit.on('click', () => pick.current(it.act));
+      hit.on('mouseover', () => line.setStyle({ weight: 7, opacity: 1 }));
+      hit.on('mouseout', () => line.setStyle({ weight: 4, opacity: .9 }));
+      all.push(...it.pts);
+    });
+    if(all.length && fitted.current !== fitKey){ fitted.current = fitKey; map.fitBounds(L.latLngBounds(all), { padding: [28, 28] }); }
+  }, [items, fitKey]);
+  return <div ref={ref} className="bigmap" role="application" aria-label="Carte de tous les parcours, zoomable" />;
+}
+
+function MapPage({ icu, conn, todayStr, onSettings }){
+  const [period, setPeriod] = useState(90);
+  const [sport, setSport] = useState('all');
+  const [tick, setTick] = useState(0);
+  const [prog, setProg] = useState({ done: 0, total: 0 });
+  const [openAct, setOpenAct] = useState(null);
+  const acts = useMemo(() => {
+    const cutoff = fmt(addDays(parse(todayStr), -period));
+    return icu.activities.filter(a => a.date >= cutoff && hasGps(a) && (sport === 'all' || a.kind === sport)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  }, [icu, period, sport, todayStr]);
+  const actKey = acts.map(a => a.id).join(',');
+
+  useEffect(() => {
+    if(!conn) return;
+    const todo = acts.filter(a => !(a.id in ROUTES));
+    setProg({ done: 0, total: todo.length });
+    if(!todo.length) return;
+    let off = false, next = 0, done = 0;
+    const worker = async () => {
+      while(!off && next < todo.length){
+        const a = todo[next++];
+        try{ const r = await fetchRoute(conn.apiKey, a.id); if(r !== undefined) ROUTES[a.id] = r; }
+        catch(e){ if(e && e.code === 'auth'){ off = true; } }
+        done++;
+        if(!off && (done % 4 === 0 || done === todo.length)){ setProg({ done, total: todo.length }); setTick(t => t + 1); }
+        if(done % 12 === 0) saveRoutes();
+      }
+    };
+    Promise.all([worker(), worker(), worker()]).then(() => { saveRoutes(); if(!off){ setProg({ done: todo.length, total: todo.length }); setTick(t => t + 1); } });
+    return () => { off = true; saveRoutes(); };
+  }, [actKey, conn]);
+
+  const items = useMemo(() => {
+    const idx = {};
+    return acts.filter(a => ROUTES[a.id] && ROUTES[a.id].length > 1).map(a => { idx[a.kind] = (idx[a.kind] || 0) + 1; return { act: a, pts: ROUTES[a.id], color: routeColor(a.kind, idx[a.kind] - 1) }; });
+  }, [actKey, tick]);
+
+  if(!conn) return (
+    <div>
+      <Header title="Carte" onSettings={onSettings} />
+      <div className="connect"><p>Connecte Intervals.icu pour voir tous tes parcours sur une carte.</p><button className="btn" onClick={onSettings}>Connecter Intervals.icu</button></div>
+    </div>
+  );
+  const kinds = ['course', 'velo', 'autre'].filter(k => items.some(i => i.act.kind === k));
+  const loading = prog.total > 0 && prog.done < prog.total;
+  const chip = (v, cur, set, label) => <button key={String(v)} role="tab" aria-selected={cur === v} className={cur === v ? 'on' : ''} onClick={() => set(v)}>{label}</button>;
+  return (
+    <div>
+      <Header title="Carte" sub={items.length + (items.length > 1 ? ' parcours' : ' parcours')} onSettings={onSettings} />
+      <div className="seg three" role="tablist" aria-label="Période">{[[30, '30 jours'], [90, '3 mois'], [180, '6 mois']].map(([v, l]) => chip(v, period, setPeriod, l))}</div>
+      <div className="seg three" role="tablist" aria-label="Sport" style={{ marginTop: 0 }}>{[['all', 'Tout'], ['course', 'Course'], ['velo', 'Vélo']].map(([v, l]) => chip(v, sport, setSport, l))}</div>
+      <RoutesMap items={items} fitKey={period + ':' + sport + ':' + (items.length > 0)} onPick={setOpenAct} />
+      <div className="maplegend">
+        {kinds.map(k => <span key={k} style={{ '--c': routeColor(k, 0) }}><i></i>{(DISC[k] || DISC.autre).short}</span>)}
+        {loading ? <em>Chargement des tracés {prog.done}/{prog.total}…</em> : <em>{items.length === 0 ? 'Aucun parcours GPS sur cette période.' : 'Touche un tracé pour ouvrir l\'activité.'}</em>}
+      </div>
+      {openAct && <ActivityModal act={openAct} conn={conn} onClose={() => setOpenAct(null)} />}
+    </div>
+  );
+}
+
 function Dash({ icu, todayStr }){
   const D = useMemo(() => buildDash(icu, todayStr), [icu, todayStr]);
   const [detail, setDetail] = useState(null);
@@ -853,11 +1056,6 @@ function Dash({ icu, todayStr }){
           </Card>
         )}
 
-        {D.steps && D.steps.date === todayStr && (
-          <Card title="Pas" sub="Aujourd'hui" onClick={() => setDetail('steps')}>
-            <p className="num">{Math.round(D.steps.steps).toLocaleString('fr-FR')}</p>
-          </Card>
-        )}
       </div>
       {detail && <HistorySheet kind={detail} icu={icu} todayStr={todayStr} onClose={() => setDetail(null)} />}
     </div>
@@ -901,11 +1099,15 @@ function IcuSettings({ conn, icu, onConnect, onDisconnect, onRefresh }){
 }
 
 /* ---------- Aujourd'hui ---------- */
-function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings }){
+function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps }){
   const today = parse(todayStr);
   const [off, setOff] = useState(0);
   const touch = useRef(null);
   const [openAct, setOpenAct] = useState(null);
+  const [stepsOpen, setStepsOpen] = useState(false);
+  const stepsData = useMemo(() => stepsMap(icu, steps), [icu, steps]);
+  const stepsToday = stepsData[todayStr] || 0;
+  const stepsWeek = Array.from({ length: 7 }, (_, i) => stepsData[fmt(addDays(parse(todayStr), -(6 - i)))] || null);
   useEffect(() => { setOff(0); }, [todayStr]);
   const weekStart = addDays(startOfWeek(today), off * 7);
   const wIdx = Math.floor(diffDays(weekStart, startOfWeek(parse(profile.programStart))) / 7);
@@ -1023,7 +1225,14 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
         <p className="rest">{week ? 'Repos.' : 'Rien de prévu.'}</p>
       )}
       </div>
+      <div className="wgrid" style={{ marginTop: 26 }}>
+        <Card title="Pas" sub={stepsToday ? "Aujourd'hui" : "Touche pour saisir tes pas"} wide onClick={() => setStepsOpen(true)}>
+          <p className="num">{stepsToday ? nFr(stepsToday) : '–'}</p>
+          <Spark values={stepsWeek} bars min0={10000} />
+        </Card>
+      </div>
       {icuConn && icu.fetchedAt && <Dash icu={icu} todayStr={todayStr} />}
+      {stepsOpen && <StepsSheet data={stepsData} manual={steps} todayStr={todayStr} onSave={onSaveSteps} onClose={() => setStepsOpen(false)} />}
       {openAct && icuConn && <ActivityModal act={openAct} conn={icuConn} onClose={()=>setOpenAct(null)} />}
     </div>
   );
@@ -1199,7 +1408,7 @@ function History({ workouts, onDelete, onSettings }){
             {g.items.map(w => {
               const dsc = DISC[w.discipline] || DISC.course;
               const isOpen = open === w.id;
-              const hasMore = w.avgHR || w.rpe || w.notes || (w.exercises && w.exercises.length);
+              const hasMore = w.avgHR || w.maxHR || w.strain || w.rpe || w.notes || (w.exercises && w.exercises.length);
               return (
                 <div className="hrow" key={w.id} style={{'--c':dsc.color}}>
                   <button className="hmain" aria-expanded={isOpen} onClick={()=>setOpen(isOpen ? null : w.id)}>
@@ -1208,7 +1417,8 @@ function History({ workouts, onDelete, onSettings }){
                   </button>
                   {isOpen && (
                     <div className="hmore">
-                      {w.avgHR ? <p><b>{w.avgHR}</b> bpm en moyenne</p> : null}
+                      {w.avgHR ? <p><b>{w.avgHR}</b> bpm en moyenne{w.maxHR ? <span>, <b>{w.maxHR}</b> bpm au maximum</span> : null}</p> : (w.maxHR ? <p><b>{w.maxHR}</b> bpm au maximum</p> : null)}
+                      {w.strain ? <p>Strain Whoop <b>{String(w.strain).replace('.', ',')}</b></p> : null}
                       {w.rpe ? <p>Effort ressenti <b>{w.rpe}/10</b></p> : null}
                       {w.notes ? <p>{w.notes}</p> : null}
                       {w.exercises && w.exercises.map((e, k) => (
@@ -1232,7 +1442,7 @@ function History({ workouts, onDelete, onSettings }){
 
 /* ---------- Feuille : séance faite ---------- */
 function LogSheet({ date, onSave, onClose }){
-  const [f, setF] = useState({ date, discipline:'course', duration:'', distance:'', avgHR:'', rpe:'', notes:'' });
+  const [f, setF] = useState({ date, discipline:'course', duration:'', distance:'', avgHR:'', maxHR:'', strain:'', rpe:'', notes:'' });
   const [more, setMore] = useState(false);
   const [err, setErr] = useState('');
   const set = (k, v) => setF(prev => ({...prev, [k]: v}));
@@ -1254,6 +1464,10 @@ function LogSheet({ date, onSave, onClose }){
           <div className="grid2">
             <div><label className="f" htmlFor="log-km">Distance (km)</label><input id="log-km" type="number" inputMode="decimal" step="0.1" value={f.distance} onChange={(e)=>set('distance', e.target.value)} /></div>
             <div><label className="f" htmlFor="log-hr">FC moyenne</label><input id="log-hr" type="number" inputMode="numeric" value={f.avgHR} onChange={(e)=>set('avgHR', e.target.value)} /></div>
+          </div>
+          <div className="grid2">
+            <div><label className="f" htmlFor="log-hrmax">FC max</label><input id="log-hrmax" type="number" inputMode="numeric" value={f.maxHR} onChange={(e)=>set('maxHR', e.target.value)} /></div>
+            <div><label className="f" htmlFor="log-strain">Strain Whoop</label><input id="log-strain" type="number" inputMode="decimal" step="0.1" min="0" max="21" value={f.strain} onChange={(e)=>set('strain', e.target.value)} /></div>
           </div>
           <label className="f" htmlFor="log-rpe">Effort ressenti (1 à 10)</label>
           <input id="log-rpe" type="number" inputMode="numeric" min="1" max="10" value={f.rpe} onChange={(e)=>set('rpe', e.target.value)} />
@@ -1491,10 +1705,15 @@ function MuscuDetail({ template, startEdit, onUpdate, onDelete, onBack, onFinish
 function FinishSheet({ title, date, onSave, onClose }){
   const [duration, setDuration] = useState('60');
   const [d, setD] = useState(date);
+  const [hr, setHr] = useState({ avgHR: '', maxHR: '', strain: '' });
   const [err, setErr] = useState('');
+  const setH = (k, v) => { setHr(prev => ({ ...prev, [k]: v })); setErr(''); };
   const save = () => {
     if(!(Number(duration) > 0)){ setErr('Indique la durée en minutes.'); return; }
-    onSave(Number(duration), d);
+    const bad = (v, lo, hi) => v !== '' && !(Number(v) >= lo && Number(v) <= hi);
+    if(bad(hr.avgHR, 30, 230) || bad(hr.maxHR, 30, 230)){ setErr('La fréquence cardiaque doit être comprise entre 30 et 230 bpm.'); return; }
+    if(bad(hr.strain, 0, 21)){ setErr('Le strain Whoop va de 0 à 21.'); return; }
+    onSave(Number(duration), d, { avgHR: hr.avgHR === '' ? '' : Number(hr.avgHR), maxHR: hr.maxHR === '' ? '' : Number(hr.maxHR), strain: hr.strain === '' ? '' : Number(String(hr.strain).replace(',', '.')) });
   };
   return (
     <Sheet title="Terminer la séance" onClose={onClose}>
@@ -1503,6 +1722,13 @@ function FinishSheet({ title, date, onSave, onClose }){
       <input id="fin-dur" className="big" type="number" inputMode="numeric" min="1" value={duration} onChange={(e)=>{ setDuration(e.target.value); setErr(''); }} autoFocus />
       <label className="f" htmlFor="fin-date">Date</label>
       <input id="fin-date" type="date" value={d} onChange={(e)=>setD(e.target.value)} />
+      <p className="note" style={{marginTop:18}}>Résumé de ta séance dans l'app Whoop (facultatif) :</p>
+      <div className="grid2">
+        <div><label className="f" htmlFor="fin-hr">FC moyenne</label><input id="fin-hr" type="number" inputMode="numeric" placeholder="bpm" value={hr.avgHR} onChange={(e)=>setH('avgHR', e.target.value)} /></div>
+        <div><label className="f" htmlFor="fin-hrmax">FC max</label><input id="fin-hrmax" type="number" inputMode="numeric" placeholder="bpm" value={hr.maxHR} onChange={(e)=>setH('maxHR', e.target.value)} /></div>
+      </div>
+      <label className="f" htmlFor="fin-strain">Strain Whoop (0 à 21)</label>
+      <input id="fin-strain" type="number" inputMode="decimal" step="0.1" min="0" max="21" placeholder="12,5" value={hr.strain} onChange={(e)=>setH('strain', e.target.value)} />
       {err && <p className="err" role="alert">{err}</p>}
       <div className="actions"><button className="btn" onClick={save}>Enregistrer la séance</button></div>
     </Sheet>
@@ -1613,6 +1839,8 @@ function App(){
   const [profile, setProfile] = useState({ ...DEFAULT_PROFILE, ...(init.profile || {}) });
   const [templates, setTemplates] = useState(init.templates);
   const [muscuView, setMuscuView] = useState(null);
+  const [steps, setSteps] = useState(init.steps || {});
+  const saveSteps = (date, n) => setSteps(prev => { const next = { ...prev }; if(n > 0) next[date] = n; else delete next[date]; return next; });
   const [icuConn, setIcuConn] = useState(() => loadIcuConn() || (window.ALLURE_DEMO ? { apiKey: 'demo' } : null));
   const emptyIcu = { status: 'idle', activities: [], wellness: [], stubs: 0, fetchedAt: null, from: '' };
   const [icu, setIcu] = useState(() => { const c = loadIcuCache(); return c && c.from === rangeFrom(fmt(new Date())) ? { ...c, status: 'idle' } : emptyIcu; });
@@ -1620,7 +1848,7 @@ function App(){
   const [sel, setSel] = useState(fmt(new Date()));
   const [sheet, setSheet] = useState(null);
 
-  useEffect(()=>{ saveState({ workouts, program, profile, templates, planVersion: PLAN_VERSION }); }, [workouts, program, profile, templates]);
+  useEffect(()=>{ saveState({ workouts, program, profile, templates, steps, planVersion: PLAN_VERSION }); }, [workouts, program, profile, templates, steps]);
   useEffect(()=>{ try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){} }, []);
   // si l'appli reste ouverte d'un jour à l'autre
   useEffect(()=>{
@@ -1687,9 +1915,9 @@ function App(){
     const s = program[from.wIdx] && program[from.wIdx].sessions.find(x => x.id === from.sid);
     return s ? fmt(addDays(weekStartFor(from.wIdx), s.day)) : todayStr;
   };
-  const finishMuscu = (template, from, duration, date) => {
+  const finishMuscu = (template, from, duration, date, extra) => {
     const exercises = template.blocks.flatMap(b => b.exercises).map(e => ({ name: e.name, sets: e.sets.map(x => ({ reps: num(x.reps), kg: num(x.kg) })) }));
-    const entry = { id: uid(), discipline:'muscu', title: template.name, templateId: template.id, duration, date, distance:'', avgHR:'', rpe:'', notes:'', exercises };
+    const entry = { id: uid(), discipline:'muscu', title: template.name, templateId: template.id, duration, date, distance:'', avgHR: (extra && extra.avgHR) || '', maxHR: (extra && extra.maxHR) || '', strain: (extra && extra.strain) || '', rpe:'', notes:'', exercises };
     let next = workouts;
     if(from){
       next = workouts.filter(w => w.sessionId !== from.sid);
@@ -1759,11 +1987,11 @@ function App(){
   const reset = () => {
     try{ localStorage.removeItem(KEY); }catch(e){}
     const tpls = defaultTemplates();
-    setWorkouts([]); setProgram(buildProgram(tpls, DEFAULT_PROFILE.zones)); setProfile({ ...DEFAULT_PROFILE, programStart: planStart() }); setTemplates(tpls); setMuscuView(null); clearIcu(); setIcuConn(null); setIcu({ ...emptyIcu }); go('today');
+    setSteps({}); setWorkouts([]); setProgram(buildProgram(tpls, DEFAULT_PROFILE.zones)); setProfile({ ...DEFAULT_PROFILE, programStart: planStart() }); setTemplates(tpls); setMuscuView(null); clearIcu(); setIcuConn(null); setIcu({ ...emptyIcu }); go('today');
   };
   const importData = (d) => {
     const tpls = d.templates || defaultTemplates();
-    setWorkouts(d.workouts || []); setProgram(d.program || buildProgram(tpls, ((d.profile || {}).zones))); setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) }); setTemplates(tpls);
+    setSteps(d.steps || {}); setWorkouts(d.workouts || []); setProgram(d.program || buildProgram(tpls, ((d.profile || {}).zones))); setProfile({ ...DEFAULT_PROFILE, ...(d.profile || {}) }); setTemplates(tpls);
   };
   const loadPlan = (zones) => {
     if(!confirm("Remplacer le calendrier par le programme type ? Les séances déjà enregistrées restent dans l'historique.")) return null;
@@ -1777,6 +2005,7 @@ function App(){
     { id:'today', label:"Aujourd'hui", icon:'today' },
     { id:'plan', label:'Calendrier', icon:'plan' },
     { id:'muscu', label:'Musculation', icon:'muscu' },
+    { id:'map', label:'Carte', icon:'map' },
     { id:'history', label:'Historique', icon:'history' },
   ];
   const onSettingsPage = page === 'settings';
@@ -1785,7 +2014,7 @@ function App(){
   return (
     <div>
       <main className="shell">
-        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} />}
+        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} />}
         {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} onToggle={toggleSession}
             onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })}
             onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
@@ -1799,9 +2028,10 @@ function App(){
                   onBack={()=>{ const from = muscuView.from; setMuscuView(null); if(from) go('today'); else window.scrollTo(0,0); }}
                   onFinish={()=>setSheet({ type:'finish', templateId:t.id, from:muscuView.from })} />;
         })()}
+        {page==='map' && <MapPage icu={icu} conn={icuConn} todayStr={todayStr} onSettings={openSettings} />}
         {page==='history' && <History workouts={workouts} onDelete={deleteWorkout} onSettings={openSettings} />}
         {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onReset={reset} onLoadPlan={loadPlan}
-            getData={()=>({ workouts, program, profile, templates })} onImport={importData}
+            getData={()=>({ workouts, program, profile, templates, steps })} onImport={importData}
             icuConn={icuConn} icu={icu} onConnectIcu={connectIcu} onDisconnectIcu={disconnectIcu} onRefreshIcu={()=>refreshIcu()} />}
       </main>
 
@@ -1825,7 +2055,7 @@ function App(){
       {sheet && sheet.type==='finish' && (() => {
         const t = templates.find(x => x.id === sheet.templateId);
         if(!t) return null;
-        return <FinishSheet title={t.name} date={sheet.from ? sessionDate(sheet.from) : todayStr} onSave={(dur, d)=>finishMuscu(t, sheet.from, dur, d)} onClose={()=>setSheet(null)} />;
+        return <FinishSheet title={t.name} date={sheet.from ? sessionDate(sheet.from) : todayStr} onSave={(dur, d, extra)=>finishMuscu(t, sheet.from, dur, d, extra)} onClose={()=>setSheet(null)} />;
       })()}
       {sheet && sheet.type==='session' && (() => {
         const s = sheet.sid ? program[sheet.wIdx].sessions.find(x => x.id === sheet.sid) : null;
