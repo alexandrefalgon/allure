@@ -1268,7 +1268,7 @@ function MapPage({ icu, conn, todayStr, onSettings }){
   );
 }
 
-function Dash({ icu, todayStr }){
+function Dash({ icu, todayStr, children }){
   const D = useMemo(() => buildDash(icu, todayStr), [icu, todayStr]);
   const [detail, setDetail] = useState(null);
   const maxSport = Math.max(1, ...D.sports.map(x => x.secs));
@@ -1341,6 +1341,7 @@ function Dash({ icu, todayStr }){
           </Card>
         )}
 
+        {children}
       </div>
       {detail && <HistorySheet kind={detail} icu={icu} todayStr={todayStr} onClose={() => setDetail(null)} />}
     </div>
@@ -1428,6 +1429,12 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
   };
 
   let sub = longDate(today);
+  const stepsCard = (
+    <Card title="Pas" sub={stepsToday ? "Aujourd'hui" : "Touche pour saisir tes pas"} wide onClick={() => setStepsOpen(true)}>
+      <p className="num">{stepsToday ? nFr(stepsToday) : '–'}</p>
+      <Spark values={stepsWeek} bars min0={10000} />
+    </Card>
+  );
 
   return (
     <div>
@@ -1511,13 +1518,9 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
         <p className="rest">{week ? 'Repos.' : 'Rien de prévu.'}</p>
       )}
       </div>
-      <div className="wgrid" style={{ marginTop: 26 }}>
-        <Card title="Pas" sub={stepsToday ? "Aujourd'hui" : "Touche pour saisir tes pas"} wide onClick={() => setStepsOpen(true)}>
-          <p className="num">{stepsToday ? nFr(stepsToday) : '–'}</p>
-          <Spark values={stepsWeek} bars min0={10000} />
-        </Card>
-      </div>
-      {icuConn && icu.fetchedAt && <Dash icu={icu} todayStr={todayStr} />}
+      {icuConn && icu.fetchedAt
+        ? <Dash icu={icu} todayStr={todayStr}>{stepsCard}</Dash>
+        : <div className="wgrid" style={{ marginTop: 26 }}>{stepsCard}</div>}
       {stepsOpen && <StepsSheet data={stepsData} manual={steps} todayStr={todayStr} onSave={onSaveSteps} onClose={() => setStepsOpen(false)} />}
       {openAct && icuConn && <ActivityModal act={openAct} conn={icuConn} onClose={()=>setOpenAct(null)} />}
     </div>
