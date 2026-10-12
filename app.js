@@ -396,11 +396,28 @@ function DiscChips({ value, onChange }) {
         DISC[id].short)))));
 }
 function IcuBlock({ conn, icu, onRefresh, onConnect, weekFrom, weekTo }) {
-    if (!conn)
+    const acts = icu.activities.filter(a => a.date >= weekFrom && a.date <= weekTo);
+    if (!conn && !acts.length)
         return (React.createElement("div", { className: "connect" },
             React.createElement("p", null, "Connecte Intervals.icu pour voir ici tes heures, tes kilom\u00E8tres, tes activit\u00E9s et ton tableau de bord."),
             React.createElement("button", { className: "btn", onClick: onConnect }, "Connecter Intervals.icu")));
-    const acts = icu.activities.filter(a => a.date >= weekFrom && a.date <= weekTo);
+    if (!conn)
+        return (React.createElement("div", null,
+            React.createElement("div", { className: "figs" },
+                React.createElement("div", { className: "fig" },
+                    React.createElement("span", { className: "v" }, fmtHM(acts.reduce((n, a) => n + a.secs, 0))),
+                    React.createElement("span", { className: "k" }, "de sport")),
+                React.createElement("div", { className: "fig" },
+                    React.createElement("span", { className: "v" },
+                        fmtKm(acts.reduce((n, a) => n + a.meters, 0)),
+                        React.createElement("span", { className: "u" }, "km")),
+                    React.createElement("span", { className: "k" }, "parcourus")),
+                React.createElement("div", { className: "fig" },
+                    React.createElement("span", { className: "v" }, acts.length),
+                    React.createElement("span", { className: "k" }, acts.length > 1 ? 'séances' : 'séance'))),
+            React.createElement("div", { className: "figfoot" },
+                React.createElement("span", null, "S\u00E9ances saisies \u00E0 la main"),
+                React.createElement("button", { className: "textbtn", onClick: onConnect }, "Connecter Intervals.icu"))));
     const secs = acts.reduce((n, a) => n + a.secs, 0);
     const meters = acts.reduce((n, a) => n + a.meters, 0);
     const first = icu.status === 'loading' && !icu.fetchedAt;
@@ -435,6 +452,12 @@ function IcuBlock({ conn, icu, onRefresh, onConnect, weekFrom, weekTo }) {
             React.createElement("span", { className: bad ? 'bad' : '' }, msg),
             React.createElement("button", { className: icu.status === 'loading' ? 'spin' : '', "aria-label": "Actualiser Intervals.icu", onClick: onRefresh },
                 React.createElement(Icon, { name: "refresh", size: 19 })))));
+}
+function manualActivities(workouts, matches, icuActs) {
+    const done = new Set(Object.keys(matches || {}));
+    const has = (date, kind) => (icuActs || []).some(a => a.date === date && a.kind === kind && a.secs > 0);
+    return (workouts || []).filter(w => Number(w.duration) > 0 && w.date && !(w.sessionId && done.has(w.sessionId)) && !(!w.sessionId && has(w.date, w.discipline)))
+        .map(w => ({ id: 'manual-' + w.id, date: w.date, secs: Math.round(Number(w.duration) * 60), meters: Math.round((Number(String(w.distance).replace(',', '.')) || 0) * 1000), elev: 0, kind: KIND_ORDER.includes(w.discipline) ? w.discipline : 'autre', name: w.title || '', manual: true }));
 }
 const sumBy = (list, f) => list.reduce((n, a) => n + f(a), 0);
 const KIND_ORDER = ['course', 'velo', 'nage', 'muscu', 'autre'];
@@ -1991,7 +2014,7 @@ function actSummary(a) {
     }
     return t;
 }
-function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, onEditWorkout, matches }) {
+function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, onEditWorkout, matches, icuStats }) {
     const today = parse(todayStr);
     const [off, setOff] = useState(0);
     const touch = useRef(null);
@@ -2045,7 +2068,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
         longDate(today)) : longDate(today);
     return (React.createElement("div", null,
         React.createElement(Header, { title: "Aujourd'hui", sub: sub, onSettings: onSettings }),
-        React.createElement(IcuBlock, { conn: icuConn, icu: icu, onRefresh: onRefreshIcu, onConnect: onSettings, weekFrom: fmt(weekStart), weekTo: fmt(addDays(weekStart, 6)) }),
+        React.createElement(IcuBlock, { conn: icuConn, icu: icuStats || icu, onRefresh: onRefreshIcu, onConnect: onSettings, weekFrom: fmt(weekStart), weekTo: fmt(addDays(weekStart, 6)) }),
         React.createElement("div", { className: "swipe", onTouchStart: onTouchStart, onTouchEnd: onTouchEnd },
             React.createElement("div", { className: "weekbar" },
                 React.createElement("div", null,
@@ -2129,7 +2152,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
                             React.createElement(Icon, { name: "chevron" }))));
                 })),
             cur.planned.length === 0 && cur.free.length === 0 && icuDay.length === 0 && (React.createElement("p", { className: "rest" }, week ? 'Repos.' : 'Rien de prévu.'))),
-        icuConn && icu.fetchedAt && React.createElement(Dash, { icu: icu, todayStr: todayStr }),
+        icuConn && icu.fetchedAt && React.createElement(Dash, { icu: icuStats || icu, todayStr: todayStr }),
         React.createElement("div", { className: "wgrid", style: { marginTop: icuConn && icu.fetchedAt ? 12 : 26 } },
             React.createElement(Card, { title: "Pas", sub: stepsToday ? "Aujourd'hui" : "Touche pour saisir tes pas", wide: true, onClick: () => setStepsOpen(true) },
                 React.createElement("p", { className: "num" }, stepsToday ? nFr(stepsToday) : '–'),
@@ -3223,6 +3246,7 @@ function App() {
     const emptyIcu = { status: 'idle', activities: [], wellness: [], stubs: 0, fetchedAt: null, from: '' };
     const [icu, setIcu] = useState(() => { const c = loadIcuCache(); return c && c.from === rangeFrom(fmt(new Date())) ? { ...c, status: 'idle' } : emptyIcu; });
     const matches = useMemo(() => matchActivities(program, profile.programStart, icuConn ? icu.activities : []), [program, profile.programStart, icu, icuConn]);
+    const icuStats = useMemo(() => ({ ...icu, activities: [...icu.activities, ...manualActivities(workouts, matches, icu.activities)] }), [icu, workouts, matches]);
     const [todayStr, setTodayStr] = useState(fmt(new Date()));
     const [sel, setSel] = useState(fmt(new Date()));
     const [sheet, setSheet] = useState(null);
@@ -3479,7 +3503,7 @@ function App() {
     const inMuscuDetail = page === 'muscu' && !!muscuView;
     return (React.createElement("div", null,
         React.createElement("main", { className: "shell" },
-            page === 'today' && React.createElement(Today, { workouts: workouts, program: program, profile: profile, todayStr: todayStr, sel: sel, setSel: setSel, templates: templates, onOpenMuscu: (id, from) => openMuscu(id, from), icuConn: icuConn, icu: icu, onRefreshIcu: () => refreshIcu(), onToggle: toggleSession, onSettings: openSettings, steps: steps, onSaveSteps: saveSteps, matches: matches, onEdit: (wIdx, sid) => setSheet({ type: 'session', wIdx, sid }), onEditWorkout: (id) => setSheet({ type: 'workout', id }) }),
+            page === 'today' && React.createElement(Today, { workouts: workouts, program: program, profile: profile, todayStr: todayStr, sel: sel, setSel: setSel, templates: templates, onOpenMuscu: (id, from) => openMuscu(id, from), icuConn: icuConn, icu: icu, icuStats: icuStats, onRefreshIcu: () => refreshIcu(), onToggle: toggleSession, onSettings: openSettings, steps: steps, onSaveSteps: saveSteps, matches: matches, onEdit: (wIdx, sid) => setSheet({ type: 'session', wIdx, sid }), onEditWorkout: (id) => setSheet({ type: 'workout', id }) }),
             page === 'plan' && React.createElement(Calendar, { program: program, profile: profile, todayStr: todayStr, templates: templates, matches: matches, workouts: workouts, onToggle: toggleSession, onEdit: (wIdx, sid) => setSheet({ type: 'session', wIdx, sid }), onAdd: (date) => setSheet({ type: 'session', wIdx: null, sid: null, date }), onMove: (wIdx, sid, iso) => placeSession(wIdx, sid, iso), onOpenMuscu: (id, from) => openMuscu(id, from), onSettings: openSettings }),
             page === 'muscu' && !muscuView && React.createElement(MuscuHome, { templates: templates, workouts: workouts, onOpen: (id) => openMuscu(id, null), onNew: newTemplate, onSettings: openSettings, onAddExercise: addExerciseToTemplate }),
             page === 'muscu' && muscuView && (() => {

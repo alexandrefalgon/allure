@@ -375,13 +375,23 @@ function DiscChips({ value, onChange }){
 
 /* ---------- Intervals.icu : chiffres de la semaine ---------- */
 function IcuBlock({ conn, icu, onRefresh, onConnect, weekFrom, weekTo }){
-  if(!conn) return (
+  const acts = icu.activities.filter(a => a.date >= weekFrom && a.date <= weekTo);
+  if(!conn && !acts.length) return (
     <div className="connect">
       <p>Connecte Intervals.icu pour voir ici tes heures, tes kilomètres, tes activités et ton tableau de bord.</p>
       <button className="btn" onClick={onConnect}>Connecter Intervals.icu</button>
     </div>
   );
-  const acts = icu.activities.filter(a => a.date >= weekFrom && a.date <= weekTo);
+  if(!conn) return (
+    <div>
+      <div className="figs">
+        <div className="fig"><span className="v">{fmtHM(acts.reduce((n, a) => n + a.secs, 0))}</span><span className="k">de sport</span></div>
+        <div className="fig"><span className="v">{fmtKm(acts.reduce((n, a) => n + a.meters, 0))}<span className="u">km</span></span><span className="k">parcourus</span></div>
+        <div className="fig"><span className="v">{acts.length}</span><span className="k">{acts.length > 1 ? 'séances' : 'séance'}</span></div>
+      </div>
+      <div className="figfoot"><span>Séances saisies à la main</span><button className="textbtn" onClick={onConnect}>Connecter Intervals.icu</button></div>
+    </div>
+  );
   const secs = acts.reduce((n, a) => n + a.secs, 0);
   const meters = acts.reduce((n, a) => n + a.meters, 0);
   const first = icu.status === 'loading' && !icu.fetchedAt;
@@ -404,6 +414,17 @@ function IcuBlock({ conn, icu, onRefresh, onConnect, weekFrom, weekTo }){
       </div>
     </div>
   );
+}
+
+/* ---------- séances saisies à la main, comptées avec les activités Intervals.icu ---------- */
+// Une séance saisie à la main n'est pas comptée si Intervals.icu a déjà l'activité correspondante :
+// - séance du plan validée par une activité Intervals (matches) ;
+// - séance hors plan du même sport le même jour qu'une activité Intervals.
+function manualActivities(workouts, matches, icuActs){
+  const done = new Set(Object.keys(matches || {}));
+  const has = (date, kind) => (icuActs || []).some(a => a.date === date && a.kind === kind && a.secs > 0);
+  return (workouts || []).filter(w => Number(w.duration) > 0 && w.date && !(w.sessionId && done.has(w.sessionId)) && !(!w.sessionId && has(w.date, w.discipline)))
+    .map(w => ({ id: 'manual-' + w.id, date: w.date, secs: Math.round(Number(w.duration) * 60), meters: Math.round((Number(String(w.distance).replace(',', '.')) || 0) * 1000), elev: 0, kind: KIND_ORDER.includes(w.discipline) ? w.discipline : 'autre', name: w.title || '', manual: true }));
 }
 
 /* ---------- Tableau de bord (cartes) ---------- */
@@ -1719,7 +1740,7 @@ function actSummary(a){
   return t;
 }
 
-function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, onEditWorkout, matches }){
+function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, onEditWorkout, matches, icuStats }){
   const today = parse(todayStr);
   const [off, setOff] = useState(0);
   const touch = useRef(null);
@@ -1769,7 +1790,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
   return (
     <div>
       <Header title="Aujourd'hui" sub={sub} onSettings={onSettings} />
-      <IcuBlock conn={icuConn} icu={icu} onRefresh={onRefreshIcu} onConnect={onSettings} weekFrom={fmt(weekStart)} weekTo={fmt(addDays(weekStart, 6))} />
+      <IcuBlock conn={icuConn} icu={icuStats || icu} onRefresh={onRefreshIcu} onConnect={onSettings} weekFrom={fmt(weekStart)} weekTo={fmt(addDays(weekStart, 6))} />
 
       <div className="swipe" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <div className="weekbar">
@@ -1858,7 +1879,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
         <p className="rest">{week ? 'Repos.' : 'Rien de prévu.'}</p>
       )}
       </div>
-      {icuConn && icu.fetchedAt && <Dash icu={icu} todayStr={todayStr} />}
+      {icuConn && icu.fetchedAt && <Dash icu={icuStats || icu} todayStr={todayStr} />}
       <div className="wgrid" style={{ marginTop: icuConn && icu.fetchedAt ? 12 : 26 }}>
         <Card title="Pas" sub={stepsToday ? "Aujourd'hui" : "Touche pour saisir tes pas"} wide onClick={() => setStepsOpen(true)}>
           <p className="num">{stepsToday ? nFr(stepsToday) : '–'}</p>
@@ -2890,6 +2911,7 @@ function App(){
   const emptyIcu = { status: 'idle', activities: [], wellness: [], stubs: 0, fetchedAt: null, from: '' };
   const [icu, setIcu] = useState(() => { const c = loadIcuCache(); return c && c.from === rangeFrom(fmt(new Date())) ? { ...c, status: 'idle' } : emptyIcu; });
   const matches = useMemo(() => matchActivities(program, profile.programStart, icuConn ? icu.activities : []), [program, profile.programStart, icu, icuConn]);
+  const icuStats = useMemo(() => ({ ...icu, activities: [...icu.activities, ...manualActivities(workouts, matches, icu.activities)] }), [icu, workouts, matches]);
   const [todayStr, setTodayStr] = useState(fmt(new Date()));
   const [sel, setSel] = useState(fmt(new Date()));
   const [sheet, setSheet] = useState(null);
@@ -3099,7 +3121,7 @@ function App(){
   return (
     <div>
       <main className="shell">
-        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} matches={matches} onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })} onEditWorkout={(id)=>setSheet({ type:'workout', id })} />}
+        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} icuStats={icuStats} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} matches={matches} onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })} onEditWorkout={(id)=>setSheet({ type:'workout', id })} />}
         {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} matches={matches} workouts={workouts} onToggle={toggleSession}
             onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })}
             onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
