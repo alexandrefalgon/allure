@@ -1982,7 +1982,7 @@ function actSummary(a) {
     }
     return t;
 }
-function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, onResult, matches }) {
+function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, onEditWorkout, matches }) {
     const today = parse(todayStr);
     const [off, setOff] = useState(0);
     const touch = useRef(null);
@@ -2078,8 +2078,6 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
                         resultOf(workouts, s.id) && (resultOf(workouts, s.id).duration || resultOf(workouts, s.id).avgHR || resultOf(workouts, s.id).maxHR) ? React.createElement("p", { className: "tag realised" },
                             "R\u00E9alis\u00E9e : ",
                             resultSummary(resultOf(workouts, s.id))) : null,
-                        s.templateId && templates.some(t => t.id === s.templateId) && (React.createElement("button", { className: "openlink", onClick: () => onOpenMuscu(s.templateId, { wIdx, sid: s.id }) }, "Voir les exercices")),
-                        React.createElement("button", { className: "openlink", onClick: () => onResult(wIdx, s.id) }, resultOf(workouts, s.id) && (resultOf(workouts, s.id).avgHR || resultOf(workouts, s.id).maxHR) ? 'Modifier durée et FC' : 'Ajouter durée et FC'),
                         React.createElement("button", { className: "openlink", onClick: () => onEdit(wIdx, s.id) }, "Modifier la s\u00E9ance")),
                     React.createElement("button", { className: "check", "aria-label": s.done ? 'Marquer comme non faite' : 'Marquer comme faite', "aria-pressed": s.done, onClick: () => onToggle(wIdx, s.id) },
                         React.createElement("span", { className: "c" },
@@ -2090,9 +2088,10 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
                         React.createElement("div", { className: "item-text", style: { opacity: 1 } },
                             React.createElement("h3", null, w.title || dsc.short),
                             React.createElement("p", { className: "desc" },
-                                fmtMin(w.duration),
+                                resultSummary(w),
                                 w.distance ? ' · ' + w.distance + ' km' : ''),
-                            React.createElement("p", { className: "tag" }, "Hors plan")),
+                            React.createElement("p", { className: "tag" }, "Hors plan"),
+                            React.createElement("button", { className: "openlink", onClick: () => onEditWorkout(w.id) }, "Modifier la s\u00E9ance")),
                         React.createElement("div", { className: "check" },
                             React.createElement("span", { className: "c" },
                                 React.createElement(Icon, { name: "check", size: 18, sw: 2.6 })))));
@@ -2131,7 +2130,7 @@ function chipLabel(s, templates) {
     }
     return s.discipline === 'nage' ? 'Nage' : s.discipline === 'muscu' ? 'Muscu.' : DISC[s.discipline].short;
 }
-function Calendar({ program, profile, todayStr, templates, matches, workouts, onResult, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }) {
+function Calendar({ program, profile, todayStr, templates, matches, workouts, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }) {
     const today = parse(todayStr);
     const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
     const [selDay, setSelDay] = useState(todayStr);
@@ -2264,9 +2263,7 @@ function Calendar({ program, profile, todayStr, templates, matches, workouts, on
                         actSummary(matches[x.id])),
                     !matches[x.id] && resultOf(workouts, x.id) && (resultOf(workouts, x.id).avgHR || resultOf(workouts, x.id).maxHR) ? React.createElement("em", { className: "realised" },
                         "R\u00E9alis\u00E9e : ",
-                        resultSummary(resultOf(workouts, x.id))) : null),
-                !matches[x.id] && React.createElement("button", { className: "openlink", onClick: () => onResult(w, x.id) }, resultOf(workouts, x.id) && (resultOf(workouts, x.id).avgHR || resultOf(workouts, x.id).maxHR) ? 'Modifier durée et FC' : 'Ajouter durée et FC'),
-                x.templateId && templates.some(t => t.id === x.templateId) && (React.createElement("button", { className: "openlink", onClick: () => onOpenMuscu(x.templateId, { wIdx: w, sid: x.id }) }, "Voir les exercices"))),
+                        resultSummary(resultOf(workouts, x.id))) : null)),
             React.createElement("button", { className: "mini", "aria-label": matches[x.id] ? 'Validée automatiquement par Intervals.icu' : x.done ? 'Marquer comme non faite' : 'Marquer comme faite', "aria-pressed": !!(x.done || matches[x.id]), disabled: !!matches[x.id], onClick: () => onToggle(w, x.id) },
                 React.createElement("span", { className: "c" },
                     React.createElement(Icon, { name: "check", size: 15, sw: 3 })))))),
@@ -2388,8 +2385,73 @@ function LogSheet({ date, onSave, onClose }) {
         React.createElement("div", { className: "actions" },
             React.createElement("button", { className: "btn", onClick: save }, "Enregistrer"))));
 }
-function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }) {
+function WorkoutSheet({ w, onSave, onDelete, onClose }) {
+    const dsc = DISC[w.discipline] || DISC.course;
+    const [f, setF] = useState({ date: w.date, duration: w.duration || '', distance: w.distance || '', avgHR: w.avgHR || '', maxHR: w.maxHR || '', strain: w.strain || '' });
+    const [err, setErr] = useState('');
+    const set = (k, v) => { setF(prev => ({ ...prev, [k]: v })); setErr(''); };
+    const save = () => {
+        const bad = (v, lo, hi) => v !== '' && !(Number(String(v).replace(',', '.')) >= lo && Number(String(v).replace(',', '.')) <= hi);
+        if (!f.date) {
+            setErr('Choisis une date.');
+            return;
+        }
+        if (!(Number(f.duration) > 0)) {
+            setErr('Indique la durée en minutes.');
+            return;
+        }
+        if (bad(f.avgHR, 30, 230) || bad(f.maxHR, 30, 230)) {
+            setErr('La fréquence cardiaque doit être comprise entre 30 et 230 bpm.');
+            return;
+        }
+        if (f.avgHR !== '' && f.maxHR !== '' && Number(f.avgHR) > Number(f.maxHR)) {
+            setErr('La FC moyenne ne peut pas dépasser la FC max.');
+            return;
+        }
+        if (bad(f.strain, 0, 21)) {
+            setErr('Le strain Whoop va de 0 à 21.');
+            return;
+        }
+        onSave({ date: f.date, duration: Number(f.duration), distance: f.distance === '' ? '' : Number(String(f.distance).replace(',', '.')), avgHR: f.avgHR === '' ? '' : Number(f.avgHR), maxHR: f.maxHR === '' ? '' : Number(f.maxHR), strain: f.strain === '' ? '' : Number(String(f.strain).replace(',', '.')) });
+    };
+    return (React.createElement(Sheet, { title: "Modifier la s\u00E9ance", onClose: onClose },
+        React.createElement("p", { className: "sub", style: { marginTop: 4 } },
+            w.title || dsc.label,
+            " \u00B7 hors plan"),
+        React.createElement("label", { className: "f", htmlFor: "w-date" }, "Date"),
+        React.createElement("input", { id: "w-date", type: "date", value: f.date, onChange: (e) => set('date', e.target.value) }),
+        React.createElement("label", { className: "f", htmlFor: "w-dur" }, "Dur\u00E9e (minutes)"),
+        React.createElement("input", { id: "w-dur", type: "number", inputMode: "numeric", min: "1", value: f.duration, onChange: (e) => set('duration', e.target.value) }),
+        w.discipline !== 'muscu' && React.createElement("div", null,
+            React.createElement("label", { className: "f", htmlFor: "w-km" }, "Distance (km)"),
+            React.createElement("input", { id: "w-km", type: "number", inputMode: "decimal", step: "0.1", value: f.distance, onChange: (e) => set('distance', e.target.value) })),
+        React.createElement("div", { className: "grid2" },
+            React.createElement("div", null,
+                React.createElement("label", { className: "f", htmlFor: "w-hr" }, "FC moyenne"),
+                React.createElement("input", { id: "w-hr", type: "number", inputMode: "numeric", placeholder: "bpm", value: f.avgHR, onChange: (e) => set('avgHR', e.target.value) })),
+            React.createElement("div", null,
+                React.createElement("label", { className: "f", htmlFor: "w-hrmax" }, "FC max"),
+                React.createElement("input", { id: "w-hrmax", type: "number", inputMode: "numeric", placeholder: "bpm", value: f.maxHR, onChange: (e) => set('maxHR', e.target.value) }))),
+        React.createElement("label", { className: "f", htmlFor: "w-strain" }, "Strain Whoop (0 \u00E0 21)"),
+        React.createElement("input", { id: "w-strain", type: "number", inputMode: "decimal", step: "0.1", min: "0", max: "21", placeholder: "12,5", value: f.strain, onChange: (e) => set('strain', e.target.value) }),
+        w.exercises && w.exercises.length > 0 && (React.createElement("div", null,
+            React.createElement("p", { className: "note", style: { marginTop: 18 } },
+                "Exercices enregistr\u00E9s (",
+                w.exercises.length,
+                ")"),
+            React.createElement("ul", { className: "exlist" }, w.exercises.map((e, i) => React.createElement("li", { key: i },
+                React.createElement("b", null, e.name),
+                React.createElement("span", null, fmtSets(e.sets || []))))))),
+        err && React.createElement("p", { className: "err", role: "alert" }, err),
+        React.createElement("div", { className: "actions" },
+            React.createElement("button", { className: "btn", onClick: save }, "Enregistrer"),
+            React.createElement("button", { className: "btn warn", onClick: () => { if (confirm('Supprimer cette séance ? Ses charges disparaîtront aussi du journal de musculation.'))
+                    onDelete(); } }, "Supprimer"))));
+}
+function SessionSheet({ initial, isNew, templates, result, onSave, onDelete, onOpenExercises, onClose }) {
     const [f, setF] = useState(initial);
+    const [r, setR] = useState({ duration: (result && result.duration) || '', avgHR: (result && result.avgHR) || '', maxHR: (result && result.maxHR) || '', strain: (result && result.strain) || '' });
+    const setRes = (k, v) => { setR(prev => ({ ...prev, [k]: v })); setErr(''); };
     const [err, setErr] = useState('');
     const [adj, setAdj] = useState({ dur: 0, pace: 0 });
     const [later, setLater] = useState(false);
@@ -2408,7 +2470,30 @@ function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }) 
             setErr('Choisis une date.');
             return;
         }
-        onSave({ ...f, desc: f.desc.trim(), target: f.target.trim(), applyLater: later && (adj.dur || adj.pace) ? { ...adj } : null });
+        let res = null;
+        if (!isNew) {
+            const bad = (v, lo, hi) => v !== '' && !(Number(String(v).replace(',', '.')) >= lo && Number(String(v).replace(',', '.')) <= hi);
+            if (r.duration !== '' && !(Number(r.duration) > 0)) {
+                setErr('La durée doit être un nombre de minutes.');
+                return;
+            }
+            if (bad(r.avgHR, 30, 230) || bad(r.maxHR, 30, 230)) {
+                setErr('La fréquence cardiaque doit être comprise entre 30 et 230 bpm.');
+                return;
+            }
+            if (r.avgHR !== '' && r.maxHR !== '' && Number(r.avgHR) > Number(r.maxHR)) {
+                setErr('La FC moyenne ne peut pas dépasser la FC max.');
+                return;
+            }
+            if (bad(r.strain, 0, 21)) {
+                setErr('Le strain Whoop va de 0 à 21.');
+                return;
+            }
+            if (r.duration !== '' || r.avgHR !== '' || r.maxHR !== '' || r.strain !== '') {
+                res = { duration: r.duration !== '' ? Number(r.duration) : (parseTargetMinutes(f.target) || 60), avgHR: r.avgHR === '' ? '' : Number(r.avgHR), maxHR: r.maxHR === '' ? '' : Number(r.maxHR), strain: r.strain === '' ? '' : Number(String(r.strain).replace(',', '.')) };
+            }
+        }
+        onSave({ ...f, desc: f.desc.trim(), target: f.target.trim(), applyLater: later && (adj.dur || adj.pace) ? { ...adj } : null, result: res });
     };
     return (React.createElement(Sheet, { title: isNew ? 'Nouvelle séance' : 'Modifier la séance', onClose: onClose },
         React.createElement("label", { className: "f" }, "Discipline"),
@@ -2418,6 +2503,7 @@ function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }) 
             React.createElement("div", { className: "chips", role: "radiogroup", "aria-label": "S\u00E9ance type" },
                 React.createElement("button", { role: "radio", "aria-checked": !f.templateId, className: "chip" + (!f.templateId ? " on" : ""), onClick: () => set('templateId', '') }, "Aucune"),
                 templates.map(t => (React.createElement("button", { key: t.id, role: "radio", "aria-checked": f.templateId === t.id, className: "chip" + (f.templateId === t.id ? " on" : ""), onClick: () => setF(prev => ({ ...prev, templateId: t.id, desc: prev.desc.trim() ? prev.desc : t.name })) }, t.name)))))),
+        !isNew && f.discipline === 'muscu' && f.templateId && templates.some(t => t.id === f.templateId) && (React.createElement("button", { className: "openlink", onClick: () => onOpenExercises(f.templateId) }, "Voir les exercices")),
         React.createElement("label", { className: "f", htmlFor: "s-date" }, "Date"),
         React.createElement("input", { id: "s-date", type: "date", value: f.date, onChange: (e) => { set('date', e.target.value); setErr(''); } }),
         cardio && (React.createElement("div", { className: "adjust" },
@@ -2445,6 +2531,19 @@ function SessionSheet({ initial, isNew, templates, onSave, onDelete, onClose }) 
         React.createElement("input", { id: "s-desc", value: f.desc, placeholder: "Sortie longue Z2", onChange: (e) => { set('desc', e.target.value); setErr(''); } }),
         React.createElement("label", { className: "f", htmlFor: "s-tgt" }, "Objectif"),
         React.createElement("input", { id: "s-tgt", value: f.target, placeholder: "1h30, Z2", onChange: (e) => set('target', e.target.value) }),
+        !isNew && (React.createElement("div", null,
+            React.createElement("p", { className: "note", style: { marginTop: 18 } }, "S\u00E9ance r\u00E9alis\u00E9e (facultatif). Remplir un champ marque la s\u00E9ance comme faite."),
+            React.createElement("label", { className: "f", htmlFor: "r-dur" }, "Dur\u00E9e r\u00E9alis\u00E9e (minutes)"),
+            React.createElement("input", { id: "r-dur", type: "number", inputMode: "numeric", min: "1", placeholder: parseTargetMinutes(f.target) ? String(parseTargetMinutes(f.target)) : 'min', value: r.duration, onChange: (e) => setRes('duration', e.target.value) }),
+            React.createElement("div", { className: "grid2" },
+                React.createElement("div", null,
+                    React.createElement("label", { className: "f", htmlFor: "r-hr" }, "FC moyenne"),
+                    React.createElement("input", { id: "r-hr", type: "number", inputMode: "numeric", placeholder: "bpm", value: r.avgHR, onChange: (e) => setRes('avgHR', e.target.value) })),
+                React.createElement("div", null,
+                    React.createElement("label", { className: "f", htmlFor: "r-hrmax" }, "FC max"),
+                    React.createElement("input", { id: "r-hrmax", type: "number", inputMode: "numeric", placeholder: "bpm", value: r.maxHR, onChange: (e) => setRes('maxHR', e.target.value) }))),
+            React.createElement("label", { className: "f", htmlFor: "r-strain" }, "Strain Whoop (0 \u00E0 21)"),
+            React.createElement("input", { id: "r-strain", type: "number", inputMode: "decimal", step: "0.1", min: "0", max: "21", placeholder: "12,5", value: r.strain, onChange: (e) => setRes('strain', e.target.value) }))),
         err && React.createElement("p", { className: "err", role: "alert" }, err),
         React.createElement("div", { className: "actions" },
             React.createElement("button", { className: "btn", onClick: save }, "Enregistrer"),
@@ -2824,11 +2923,10 @@ function MuscuDetail({ template, startEdit, onUpdate, onDelete, onBack, onFinish
             React.createElement("button", { className: "btn ghost full", style: { marginBottom: 14 }, onClick: () => addEx('') }, "Cr\u00E9er un exercice libre"),
             React.createElement(ExerciseLibrary, { workouts: [], templates: [], onPick: (e) => addEx(e.nom) })))));
 }
-function FinishSheet({ title, date, onSave, onClose, heading, initial, fixedDate, button }) {
-    const ini = initial || {};
-    const [duration, setDuration] = useState(String(ini.duration || '60'));
+function FinishSheet({ title, date, onSave, onClose }) {
+    const [duration, setDuration] = useState('60');
     const [d, setD] = useState(date);
-    const [hr, setHr] = useState({ avgHR: ini.avgHR || '', maxHR: ini.maxHR || '', strain: ini.strain || '' });
+    const [hr, setHr] = useState({ avgHR: '', maxHR: '', strain: '' });
     const [err, setErr] = useState('');
     const setH = (k, v) => { setHr(prev => ({ ...prev, [k]: v })); setErr(''); };
     const save = () => {
@@ -2851,12 +2949,12 @@ function FinishSheet({ title, date, onSave, onClose, heading, initial, fixedDate
         }
         onSave(Number(duration), d, { avgHR: hr.avgHR === '' ? '' : Number(hr.avgHR), maxHR: hr.maxHR === '' ? '' : Number(hr.maxHR), strain: hr.strain === '' ? '' : Number(String(hr.strain).replace(',', '.')) });
     };
-    return (React.createElement(Sheet, { title: heading || 'Terminer la séance', onClose: onClose },
+    return (React.createElement(Sheet, { title: "Terminer la s\u00E9ance", onClose: onClose },
         React.createElement("p", { className: "sub", style: { marginTop: 4 } }, title),
         React.createElement("label", { className: "f", htmlFor: "fin-dur" }, "Dur\u00E9e (minutes)"),
         React.createElement("input", { id: "fin-dur", className: "big", type: "number", inputMode: "numeric", min: "1", value: duration, onChange: (e) => { setDuration(e.target.value); setErr(''); }, autoFocus: true }),
-        !fixedDate && React.createElement("label", { className: "f", htmlFor: "fin-date" }, "Date"),
-        !fixedDate && React.createElement("input", { id: "fin-date", type: "date", value: d, onChange: (e) => setD(e.target.value) }),
+        React.createElement("label", { className: "f", htmlFor: "fin-date" }, "Date"),
+        React.createElement("input", { id: "fin-date", type: "date", value: d, onChange: (e) => setD(e.target.value) }),
         React.createElement("p", { className: "note", style: { marginTop: 18 } }, "R\u00E9sum\u00E9 de ta s\u00E9ance dans l'app Whoop (facultatif) :"),
         React.createElement("div", { className: "grid2" },
             React.createElement("div", null,
@@ -2869,7 +2967,7 @@ function FinishSheet({ title, date, onSave, onClose, heading, initial, fixedDate
         React.createElement("input", { id: "fin-strain", type: "number", inputMode: "decimal", step: "0.1", min: "0", max: "21", placeholder: "12,5", value: hr.strain, onChange: (e) => setH('strain', e.target.value) }),
         err && React.createElement("p", { className: "err", role: "alert" }, err),
         React.createElement("div", { className: "actions" },
-            React.createElement("button", { className: "btn", onClick: save }, button || 'Enregistrer la séance'))));
+            React.createElement("button", { className: "btn", onClick: save }, "Enregistrer la s\u00E9ance"))));
 }
 function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }) {
     const [f, setF] = useState(profile);
@@ -3114,18 +3212,6 @@ function App() {
             setWorkouts(workouts.filter(w => w.sessionId !== sid));
         }
     };
-    const saveResult = (wIdx, sid, duration, date, extra) => {
-        const s = program[wIdx] && program[wIdx].sessions.find(x => x.id === sid);
-        if (!s)
-            return;
-        const vals = { duration, avgHR: extra.avgHR, maxHR: extra.maxHR, strain: extra.strain };
-        setProgram(program.map((w, i) => i !== wIdx ? w : { ...w, sessions: w.sessions.map(x => x.id === sid ? { ...x, done: true } : x) }));
-        if (workouts.some(w => w.sessionId === sid))
-            setWorkouts(workouts.map(w => w.sessionId === sid ? { ...w, ...vals } : w));
-        else
-            setWorkouts([...workouts, { id: uid(), sessionId: sid, date, discipline: s.discipline, ...(s.templateId ? { title: ((templates.find(t => t.id === s.templateId) || {}).name) || '', templateId: s.templateId } : {}), distance: '', rpe: '', notes: '', ...vals }]);
-        setSheet(null);
-    };
     const logWorkout = (data) => { setWorkouts([...workouts, { ...data, id: uid() }]); setSheet(null); };
     const deleteWorkout = (w) => {
         setWorkouts(workouts.filter(x => x.id !== w.id));
@@ -3153,13 +3239,20 @@ function App() {
         setWorkouts(ws => ws.map(w => w.sessionId === sid ? { ...w, date: iso, ...(fields && fields.discipline ? { discipline: fields.discipline } : {}) } : w));
     };
     const saveSession = (wIdx, sid, data) => {
-        const { date, applyLater, ...fields } = data;
+        const { date, applyLater, result, ...fields } = data;
         if (sid) {
             const later = !applyLater ? null : (prog, start) => {
                 const base = startOfWeek(parse(start)), day = (parse(date).getDay() + 6) % 7;
                 return prog.map((w, i) => ({ ...w, sessions: w.sessions.map(x => (x.id === sid || x.done || x.discipline !== fields.discipline || x.day !== day || fmt(addDays(base, i * 7 + x.day)) <= date) ? x : applyDelta(x, applyLater)) }));
             };
             placeSession(wIdx, sid, date, fields, later);
+            if (result) {
+                setProgram(prog => prog.map(w => ({ ...w, sessions: w.sessions.map(x => x.id === sid ? { ...x, done: true } : x) })));
+                const tpl = fields.templateId && templates.find(t => t.id === fields.templateId);
+                setWorkouts(ws => ws.some(w => w.sessionId === sid)
+                    ? ws.map(w => w.sessionId === sid ? { ...w, ...result } : w)
+                    : [...ws, { id: uid(), sessionId: sid, date, discipline: fields.discipline, ...(tpl ? { title: tpl.name, templateId: tpl.id } : {}), distance: '', rpe: '', notes: '', ...result }]);
+            }
         }
         else {
             const loc = locateWeek(program, profile.programStart, date);
@@ -3261,8 +3354,8 @@ function App() {
     const inMuscuDetail = page === 'muscu' && !!muscuView;
     return (React.createElement("div", null,
         React.createElement("main", { className: "shell" },
-            page === 'today' && React.createElement(Today, { workouts: workouts, program: program, profile: profile, todayStr: todayStr, sel: sel, setSel: setSel, templates: templates, onOpenMuscu: (id, from) => openMuscu(id, from), icuConn: icuConn, icu: icu, onRefreshIcu: () => refreshIcu(), onToggle: toggleSession, onSettings: openSettings, steps: steps, onSaveSteps: saveSteps, matches: matches, onEdit: (wIdx, sid) => setSheet({ type: 'session', wIdx, sid }), onResult: (wIdx, sid) => setSheet({ type: 'result', wIdx, sid }) }),
-            page === 'plan' && React.createElement(Calendar, { program: program, profile: profile, todayStr: todayStr, templates: templates, matches: matches, workouts: workouts, onResult: (wIdx, sid) => setSheet({ type: 'result', wIdx, sid }), onToggle: toggleSession, onEdit: (wIdx, sid) => setSheet({ type: 'session', wIdx, sid }), onAdd: (date) => setSheet({ type: 'session', wIdx: null, sid: null, date }), onMove: (wIdx, sid, iso) => placeSession(wIdx, sid, iso), onOpenMuscu: (id, from) => openMuscu(id, from), onSettings: openSettings }),
+            page === 'today' && React.createElement(Today, { workouts: workouts, program: program, profile: profile, todayStr: todayStr, sel: sel, setSel: setSel, templates: templates, onOpenMuscu: (id, from) => openMuscu(id, from), icuConn: icuConn, icu: icu, onRefreshIcu: () => refreshIcu(), onToggle: toggleSession, onSettings: openSettings, steps: steps, onSaveSteps: saveSteps, matches: matches, onEdit: (wIdx, sid) => setSheet({ type: 'session', wIdx, sid }), onEditWorkout: (id) => setSheet({ type: 'workout', id }) }),
+            page === 'plan' && React.createElement(Calendar, { program: program, profile: profile, todayStr: todayStr, templates: templates, matches: matches, workouts: workouts, onToggle: toggleSession, onEdit: (wIdx, sid) => setSheet({ type: 'session', wIdx, sid }), onAdd: (date) => setSheet({ type: 'session', wIdx: null, sid: null, date }), onMove: (wIdx, sid, iso) => placeSession(wIdx, sid, iso), onOpenMuscu: (id, from) => openMuscu(id, from), onSettings: openSettings }),
             page === 'muscu' && !muscuView && React.createElement(MuscuHome, { templates: templates, workouts: workouts, onOpen: (id) => openMuscu(id, null), onNew: newTemplate, onSettings: openSettings, onAddExercise: addExerciseToTemplate }),
             page === 'muscu' && muscuView && (() => {
                 const t = templates.find(x => x.id === muscuView.templateId);
@@ -3293,19 +3386,16 @@ function App() {
                 return null;
             return React.createElement(FinishSheet, { title: t.name, date: sheet.from ? sessionDate(sheet.from) : todayStr, onSave: (dur, d, extra) => finishMuscu(t, sheet.from, dur, d, extra), onClose: () => setSheet(null) });
         })(),
-        sheet && sheet.type === 'result' && (() => {
-            const s = program[sheet.wIdx] && program[sheet.wIdx].sessions.find(x => x.id === sheet.sid);
-            if (!s)
+        sheet && sheet.type === 'workout' && (() => {
+            const w = workouts.find(x => x.id === sheet.id);
+            if (!w)
                 return null;
-            const t = s.templateId && templates.find(x => x.id === s.templateId);
-            const ex = resultOf(workouts, s.id) || {};
-            const date = fmt(addDays(weekStartFor(sheet.wIdx), s.day));
-            return React.createElement(FinishSheet, { key: s.id, heading: "S\u00E9ance r\u00E9alis\u00E9e", button: "Enregistrer", fixedDate: true, title: (t && t.name) || DISC[s.discipline].short, date: date, initial: { duration: ex.duration || parseTargetMinutes(s.target) || 60, avgHR: ex.avgHR, maxHR: ex.maxHR, strain: ex.strain }, onSave: (dur, d, extra) => saveResult(sheet.wIdx, s.id, dur, date, extra), onClose: () => setSheet(null) });
+            return React.createElement(WorkoutSheet, { key: w.id, w: w, onSave: (d) => { setWorkouts(workouts.map(x => x.id === w.id ? { ...x, ...d } : x)); setSheet(null); }, onDelete: () => { deleteWorkout(w); setSheet(null); }, onClose: () => setSheet(null) });
         })(),
         sheet && sheet.type === 'session' && (() => {
             const s = sheet.sid ? program[sheet.wIdx].sessions.find(x => x.id === sheet.sid) : null;
             const initial = s ? { discipline: s.discipline, date: fmt(addDays(weekStartFor(sheet.wIdx), s.day)), desc: s.desc, target: s.target, templateId: s.templateId || '' } : { discipline: 'course', date: sheet.date || todayStr, desc: '', target: '', templateId: '' };
-            return React.createElement(SessionSheet, { isNew: !s, initial: initial, templates: templates, onSave: (d) => saveSession(sheet.wIdx, sheet.sid, d), onDelete: () => deleteSession(sheet.wIdx, sheet.sid), onClose: () => setSheet(null) });
+            return React.createElement(SessionSheet, { key: sheet.sid || 'new', isNew: !s, initial: initial, templates: templates, result: s ? resultOf(workouts, s.id) : null, onOpenExercises: (tid) => { setSheet(null); openMuscu(tid, { wIdx: sheet.wIdx, sid: s.id }); }, onSave: (d) => saveSession(sheet.wIdx, sheet.sid, d), onDelete: () => deleteSession(sheet.wIdx, sheet.sid), onClose: () => setSheet(null) });
         })()));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App, null));
