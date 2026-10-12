@@ -395,3 +395,4 @@ textarea{min-height:76px;resize:vertical;}
 .exhow{font-size:16px;line-height:1.5;margin-top:6px;}
 .exadd{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
 select{width:100%;}
+.item p.tag.realised{color:var(--ink);font-weight:600;}

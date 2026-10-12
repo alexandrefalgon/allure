@@ -26,6 +26,10 @@ const shortDate = (d) => d.getDate() + ' ' + MONTHS[d.getMonth()];
 const longDate = (d) => DAYS_LONG[(d.getDay()+6)%7] + ' ' + d.getDate() + ' ' + MONTHS_LONG[d.getMonth()];
 const fmtMin = (n) => { n = Number(n)||0; if(!n) return '—'; if(n < 60) return n + ' min'; const h = Math.floor(n/60), m = n%60; return h + 'h' + (m ? pad(m) : ''); };
 
+// données saisies à la main pour une séance prévue (durée, FC moyenne, FC max, strain)
+const resultOf = (workouts, sid) => workouts.find(w => w.sessionId === sid) || null;
+const resultSummary = (w) => [fmtMin(w.duration), w.avgHR ? 'FC moy ' + w.avgHR : '', w.maxHR ? 'FC max ' + w.maxHR : '', w.strain ? 'strain ' + String(w.strain).replace('.', ',') : ''].filter(Boolean).join(' · ');
+
 function parseTargetMinutes(t){
   if(!t) return 0;
   const s = String(t).toLowerCase();
@@ -1707,7 +1711,7 @@ function actSummary(a){
   return t;
 }
 
-function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, matches }){
+function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, onResult, matches }){
   const today = parse(todayStr);
   const [off, setOff] = useState(0);
   const touch = useRef(null);
@@ -1804,9 +1808,11 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
               <h3>{(s.templateId && (templates.find(t => t.id === s.templateId) || {}).name) || DISC[s.discipline].short}</h3>
               <p className="desc">{s.desc}</p>
               {s.target && <p className="tgt">{s.target}</p>}
+              {resultOf(workouts, s.id) && (resultOf(workouts, s.id).duration || resultOf(workouts, s.id).avgHR || resultOf(workouts, s.id).maxHR) ? <p className="tag realised">Réalisée : {resultSummary(resultOf(workouts, s.id))}</p> : null}
               {s.templateId && templates.some(t => t.id === s.templateId) && (
                 <button className="openlink" onClick={()=>onOpenMuscu(s.templateId, { wIdx, sid: s.id })}>Voir les exercices</button>
               )}
+              <button className="openlink" onClick={()=>onResult(wIdx, s.id)}>{resultOf(workouts, s.id) && (resultOf(workouts, s.id).avgHR || resultOf(workouts, s.id).maxHR) ? 'Modifier durée et FC' : 'Ajouter durée et FC'}</button>
               <button className="openlink" onClick={()=>onEdit(wIdx, s.id)}>Modifier la séance</button>
             </div>
             <button className="check" aria-label={s.done ? 'Marquer comme non faite' : 'Marquer comme faite'} aria-pressed={s.done} onClick={()=>onToggle(wIdx, s.id)}>
@@ -1868,7 +1874,7 @@ function chipLabel(s, templates){
   return s.discipline === 'nage' ? 'Nage' : s.discipline === 'muscu' ? 'Muscu.' : DISC[s.discipline].short;
 }
 
-function Calendar({ program, profile, todayStr, templates, matches, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }){
+function Calendar({ program, profile, todayStr, templates, matches, workouts, onResult, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }){
   const today = parse(todayStr);
   const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selDay, setSelDay] = useState(todayStr);
@@ -1988,7 +1994,9 @@ function Calendar({ program, profile, todayStr, templates, matches, onToggle, on
               <span>{x.desc}</span>
               {x.target && <em>{x.target}</em>}
               {matches[x.id] && <em className="realised">Réalisée : {actSummary(matches[x.id])}</em>}
+              {!matches[x.id] && resultOf(workouts, x.id) && (resultOf(workouts, x.id).avgHR || resultOf(workouts, x.id).maxHR) ? <em className="realised">Réalisée : {resultSummary(resultOf(workouts, x.id))}</em> : null}
             </button>
+            {!matches[x.id] && <button className="openlink" onClick={()=>onResult(w, x.id)}>{resultOf(workouts, x.id) && (resultOf(workouts, x.id).avgHR || resultOf(workouts, x.id).maxHR) ? 'Modifier durée et FC' : 'Ajouter durée et FC'}</button>}
             {x.templateId && templates.some(t => t.id === x.templateId) && (
               <button className="openlink" onClick={()=>onOpenMuscu(x.templateId, { wIdx: w, sid: x.id })}>Voir les exercices</button>
             )}
@@ -2555,26 +2563,28 @@ function MuscuDetail({ template, startEdit, onUpdate, onDelete, onBack, onFinish
   );
 }
 
-function FinishSheet({ title, date, onSave, onClose }){
-  const [duration, setDuration] = useState('60');
+function FinishSheet({ title, date, onSave, onClose, heading, initial, fixedDate, button }){
+  const ini = initial || {};
+  const [duration, setDuration] = useState(String(ini.duration || '60'));
   const [d, setD] = useState(date);
-  const [hr, setHr] = useState({ avgHR: '', maxHR: '', strain: '' });
+  const [hr, setHr] = useState({ avgHR: ini.avgHR || '', maxHR: ini.maxHR || '', strain: ini.strain || '' });
   const [err, setErr] = useState('');
   const setH = (k, v) => { setHr(prev => ({ ...prev, [k]: v })); setErr(''); };
   const save = () => {
     if(!(Number(duration) > 0)){ setErr('Indique la durée en minutes.'); return; }
     const bad = (v, lo, hi) => v !== '' && !(Number(v) >= lo && Number(v) <= hi);
     if(bad(hr.avgHR, 30, 230) || bad(hr.maxHR, 30, 230)){ setErr('La fréquence cardiaque doit être comprise entre 30 et 230 bpm.'); return; }
+    if(hr.avgHR !== '' && hr.maxHR !== '' && Number(hr.avgHR) > Number(hr.maxHR)){ setErr('La FC moyenne ne peut pas dépasser la FC max.'); return; }
     if(bad(hr.strain, 0, 21)){ setErr('Le strain Whoop va de 0 à 21.'); return; }
     onSave(Number(duration), d, { avgHR: hr.avgHR === '' ? '' : Number(hr.avgHR), maxHR: hr.maxHR === '' ? '' : Number(hr.maxHR), strain: hr.strain === '' ? '' : Number(String(hr.strain).replace(',', '.')) });
   };
   return (
-    <Sheet title="Terminer la séance" onClose={onClose}>
+    <Sheet title={heading || 'Terminer la séance'} onClose={onClose}>
       <p className="sub" style={{marginTop:4}}>{title}</p>
       <label className="f" htmlFor="fin-dur">Durée (minutes)</label>
       <input id="fin-dur" className="big" type="number" inputMode="numeric" min="1" value={duration} onChange={(e)=>{ setDuration(e.target.value); setErr(''); }} autoFocus />
-      <label className="f" htmlFor="fin-date">Date</label>
-      <input id="fin-date" type="date" value={d} onChange={(e)=>setD(e.target.value)} />
+      {!fixedDate && <label className="f" htmlFor="fin-date">Date</label>}
+      {!fixedDate && <input id="fin-date" type="date" value={d} onChange={(e)=>setD(e.target.value)} />}
       <p className="note" style={{marginTop:18}}>Résumé de ta séance dans l'app Whoop (facultatif) :</p>
       <div className="grid2">
         <div><label className="f" htmlFor="fin-hr">FC moyenne</label><input id="fin-hr" type="number" inputMode="numeric" placeholder="bpm" value={hr.avgHR} onChange={(e)=>setH('avgHR', e.target.value)} /></div>
@@ -2583,7 +2593,7 @@ function FinishSheet({ title, date, onSave, onClose }){
       <label className="f" htmlFor="fin-strain">Strain Whoop (0 à 21)</label>
       <input id="fin-strain" type="number" inputMode="decimal" step="0.1" min="0" max="21" placeholder="12,5" value={hr.strain} onChange={(e)=>setH('strain', e.target.value)} />
       {err && <p className="err" role="alert">{err}</p>}
-      <div className="actions"><button className="btn" onClick={save}>Enregistrer la séance</button></div>
+      <div className="actions"><button className="btn" onClick={save}>{button || 'Enregistrer la séance'}</button></div>
     </Sheet>
   );
 }
@@ -2817,6 +2827,17 @@ function App(){
     }
   };
 
+  // saisie de la durée et de la FC directement sur une séance prévue : la séance est marquée faite, les valeurs existantes sont conservées
+  const saveResult = (wIdx, sid, duration, date, extra) => {
+    const s = program[wIdx] && program[wIdx].sessions.find(x => x.id === sid);
+    if(!s) return;
+    const vals = { duration, avgHR: extra.avgHR, maxHR: extra.maxHR, strain: extra.strain };
+    setProgram(program.map((w,i) => i!==wIdx ? w : { ...w, sessions: w.sessions.map(x => x.id===sid ? { ...x, done:true } : x) }));
+    if(workouts.some(w => w.sessionId === sid)) setWorkouts(workouts.map(w => w.sessionId === sid ? { ...w, ...vals } : w));
+    else setWorkouts([...workouts, { id: uid(), sessionId: sid, date, discipline: s.discipline, ...(s.templateId ? { title: ((templates.find(t => t.id === s.templateId) || {}).name) || '', templateId: s.templateId } : {}), distance:'', rpe:'', notes:'', ...vals }]);
+    setSheet(null);
+  };
+
   const logWorkout = (data) => { setWorkouts([...workouts, { ...data, id: uid() }]); setSheet(null); };
 
   const deleteWorkout = (w) => {
@@ -2918,8 +2939,8 @@ function App(){
   return (
     <div>
       <main className="shell">
-        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} matches={matches} onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })} />}
-        {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} matches={matches} onToggle={toggleSession}
+        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} matches={matches} onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })} onResult={(wIdx, sid)=>setSheet({ type:'result', wIdx, sid })} />}
+        {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} matches={matches} workouts={workouts} onResult={(wIdx, sid)=>setSheet({ type:'result', wIdx, sid })} onToggle={toggleSession}
             onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })}
             onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
             onMove={(wIdx, sid, iso)=>placeSession(wIdx, sid, iso)}
@@ -2961,6 +2982,16 @@ function App(){
         const t = templates.find(x => x.id === sheet.templateId);
         if(!t) return null;
         return <FinishSheet title={t.name} date={sheet.from ? sessionDate(sheet.from) : todayStr} onSave={(dur, d, extra)=>finishMuscu(t, sheet.from, dur, d, extra)} onClose={()=>setSheet(null)} />;
+      })()}
+      {sheet && sheet.type==='result' && (() => {
+        const s = program[sheet.wIdx] && program[sheet.wIdx].sessions.find(x => x.id === sheet.sid);
+        if(!s) return null;
+        const t = s.templateId && templates.find(x => x.id === s.templateId);
+        const ex = resultOf(workouts, s.id) || {};
+        const date = fmt(addDays(weekStartFor(sheet.wIdx), s.day));
+        return <FinishSheet key={s.id} heading="Séance réalisée" button="Enregistrer" fixedDate title={(t && t.name) || DISC[s.discipline].short} date={date}
+                 initial={{ duration: ex.duration || parseTargetMinutes(s.target) || 60, avgHR: ex.avgHR, maxHR: ex.maxHR, strain: ex.strain }}
+                 onSave={(dur, d, extra)=>saveResult(sheet.wIdx, s.id, dur, date, extra)} onClose={()=>setSheet(null)} />;
       })()}
       {sheet && sheet.type==='session' && (() => {
         const s = sheet.sid ? program[sheet.wIdx].sessions.find(x => x.id === sheet.sid) : null;
