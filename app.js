@@ -2999,7 +2999,7 @@ function Onboarding({ initialName, onDone }) {
                 React.createElement("label", { className: "f", htmlFor: "intro-name" }, "Comment dois-je m'adresser \u00E0 toi ?"),
                 React.createElement("input", { id: "intro-name", className: "big", autoComplete: "given-name", autoCapitalize: "words", maxLength: 30, placeholder: "Ton pr\u00E9nom", value: name, autoFocus: true, onChange: (e) => setName(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter' && clean)
                         setStep(1); } }),
-                React.createElement("p", { className: "note" }, "Je m'en souviendrai et je te dirai bonjour dans l'onglet Aujourd'hui. Tu pourras le changer dans R\u00E9glages."))),
+                React.createElement("p", { className: "note" }, "Tu pourras le changer dans R\u00E9glages."))),
             step === 1 && (React.createElement("div", null,
                 React.createElement("h1", null, "Ta fr\u00E9quence cardiaque"),
                 React.createElement("p", { className: "lead" }, "Tes zones (Z1 \u00E0 Z5) sont propres \u00E0 toi, donc rien n'est pr\u00E9rempli."),

@@ -2691,7 +2691,7 @@ function Onboarding({ initialName, onDone }){
             <label className="f" htmlFor="intro-name">Comment dois-je m'adresser à toi ?</label>
             <input id="intro-name" className="big" autoComplete="given-name" autoCapitalize="words" maxLength={30} placeholder="Ton prénom" value={name} autoFocus
                    onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter' && clean) setStep(1); }} />
-            <p className="note">Je m'en souviendrai et je te dirai bonjour dans l'onglet Aujourd'hui. Tu pourras le changer dans Réglages.</p>
+            <p className="note">Tu pourras le changer dans Réglages.</p>
           </div>
         )}
         {step === 1 && (
