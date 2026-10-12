@@ -347,3 +347,8 @@ textarea{min-height:76px;resize:vertical;}
 .howto{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:var(--card);}
 .howto summary{font-weight:600;cursor:pointer;}
 .howto p{margin-top:10px;color:var(--ink2);font-size:14.5px;line-height:1.5;}
+
+/* séance validée automatiquement par une activité Intervals.icu */
+.item.done.act{cursor:pointer;}
+.srow em.realised{color:var(--ink);font-weight:600;}
+.mini:disabled{opacity:1;cursor:default;}

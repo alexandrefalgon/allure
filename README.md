@@ -22,5 +22,5 @@ Réglages → Sauvegarde → Exporter (fichier JSON). Importer permet de restaur
 La clé Intervals.icu n'est pas incluse dans l'export.
 
 ## Modifier l'application
-Le code source est dans `src/app.jsx` et `src/style.css`.
-`app.js` et `style.css` à la racine sont les fichiers servis (compilés avec Babel, JSX classique).
+Le code source est dans `src/app.jsx` et `src/style.css`. `app.js` et `style.css` à la racine sont générés :
+`npm install` (une fois) puis `npm run build`. Voir `CLAUDE.md` pour le détail.

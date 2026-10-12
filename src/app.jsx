@@ -1384,7 +1384,32 @@ function IcuSettings({ conn, icu, onConnect, onDisconnect, onRefresh }){
 }
 
 /* ---------- Aujourd'hui ---------- */
-function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit }){
+// Rapproche les activités Intervals.icu des séances prévues : même jour, même sport, activité d'au moins 10 min.
+// Résultat : { idSéance: activité }. Rien n'est écrit dans le programme : si l'activité disparaît, la séance redevient « à faire ».
+function matchActivities(program, programStart, acts){
+  const out = {};
+  if(!acts || !acts.length || !program.length) return out;
+  const base = startOfWeek(parse(programStart)), planned = {}, byDay = {};
+  program.forEach((w, i) => w.sessions.forEach(x => { if(x.done) return; const d = fmt(addDays(base, i * 7 + x.day)); (planned[d] = planned[d] || []).push(x); }));
+  acts.forEach(a => { if(planned[a.date] && a.secs >= 600) (byDay[a.date] = byDay[a.date] || []).push(a); });
+  Object.keys(byDay).forEach(d => {
+    const list = byDay[d].slice().sort((u, v) => (u.time || '').localeCompare(v.time || '')), used = new Set();
+    planned[d].forEach(x => { const a = list.find(y => !used.has(y.id) && y.kind === x.discipline); if(a){ used.add(a.id); out[x.id] = a; } });
+  });
+  return out;
+}
+function actSummary(a){
+  let t = fmtMin(Math.round(a.secs / 60));
+  if(a.kind === 'nage' && a.meters) t += ' · ' + Math.round(a.meters) + ' m';
+  else if(a.meters){
+    t += ' · ' + fmtKm(a.meters) + ' km';
+    if(a.kind === 'course') t += ' · ' + paceStr(a.secs, a.meters, 1000) + '/km';
+    else if(a.kind === 'velo') t += ' · ' + (a.meters / a.secs * 3.6).toFixed(1).replace('.', ',') + ' km/h';
+  }
+  return t;
+}
+
+function Today({ workouts, program, profile, todayStr, sel, setSel, templates, onOpenMuscu, icuConn, icu, onRefreshIcu, onToggle, onSettings, steps, onSaveSteps, onEdit, matches }){
   const today = parse(todayStr);
   const [off, setOff] = useState(0);
   const touch = useRef(null);
@@ -1407,10 +1432,11 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
     };
   });
   const total = week ? week.sessions.length : 0;
-  const done = week ? week.sessions.filter(s => s.done).length : 0;
+  const done = week ? week.sessions.filter(s => s.done || matches[s.id]).length : 0;
   const cur = days.find(d => d.iso === sel) || days.find(d => d.iso === todayStr) || days[0];
   const isToday = cur.iso === todayStr;
-  const icuDay = icuConn ? icu.activities.filter(a => a.date === cur.iso) : [];
+  const matchedIds = new Set(Object.keys(matches).map(k => matches[k].id));
+  const icuDay = icuConn ? icu.activities.filter(a => a.date === cur.iso && !matchedIds.has(a.id)) : [];
 
   const goWeek = (delta) => {
     const n = Math.max(-52, Math.min(52, off + delta));
@@ -1453,7 +1479,7 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
             <span className="l">{DAYS_LETTER[d.i]}</span>
             <span className="n">{d.date.getDate()}</span>
             <span className="dots">
-              {d.planned.map(s => <i key={s.id} className={"dot"+(s.done?" on":"")} style={{'--c':DISC[s.discipline].color}}></i>)}
+              {d.planned.map(s => <i key={s.id} className={"dot"+(s.done||matches[s.id]?" on":"")} style={{'--c':DISC[s.discipline].color}}></i>)}
               {d.free.map(w => <i key={w.id} className="dot on" style={{'--c':(DISC[w.discipline]||DISC.course).color}}></i>)}
             </span>
           </button>
@@ -1463,7 +1489,18 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
       {!isToday && <h2 className="daytitle">{longDate(cur.date)}</h2>}
 
       <ul>
-        {cur.planned.map(s => (
+        {cur.planned.map(s => matches[s.id] ? (
+          <li key={s.id} className="item done act" style={{'--c':DISC[s.discipline].color}} role="button" tabIndex={0} aria-label={'Séance réalisée : ' + (matches[s.id].name || DISC[s.discipline].short)}
+              onClick={()=>setOpenAct(matches[s.id])} onKeyDown={(e)=>{ if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setOpenAct(matches[s.id]); } }}>
+            <div className="item-text" style={{opacity:1}}>
+              <h3>{matches[s.id].name || DISC[s.discipline].short}</h3>
+              <p className="desc">{actSummary(matches[s.id])}</p>
+              <p className="tag">Prévu : {s.desc}{s.target ? ' · ' + s.target : ''}</p>
+              <p className="tag">{matches[s.id].time ? matches[s.id].time + ' · ' : ''}Validée automatiquement · Intervals.icu</p>
+            </div>
+            <div className="check"><span className="c"><Icon name="check" size={18} sw={2.6} /></span></div>
+          </li>
+        ) : (
           <li key={s.id} className={"item"+(s.done?" done":"")} style={{'--c':DISC[s.discipline].color}}>
             <div className="item-text">
               <h3>{(s.templateId && (templates.find(t => t.id === s.templateId) || {}).name) || DISC[s.discipline].short}</h3>
@@ -1533,7 +1570,7 @@ function chipLabel(s, templates){
   return s.discipline === 'nage' ? 'Nage' : s.discipline === 'muscu' ? 'Muscu.' : DISC[s.discipline].short;
 }
 
-function Calendar({ program, profile, todayStr, templates, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }){
+function Calendar({ program, profile, todayStr, templates, matches, onToggle, onEdit, onAdd, onMove, onOpenMuscu, onSettings }){
   const today = parse(todayStr);
   const [month, setMonth] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
   const [selDay, setSelDay] = useState(todayStr);
@@ -1632,7 +1669,7 @@ function Calendar({ program, profile, todayStr, templates, onToggle, onEdit, onA
                  onClick={()=>setSelDay(iso)}>
               <span className="cn">{d.getDate()}</span>
               {list.slice(0, 3).map(({ s: x, w }) => (
-                <div key={x.id} className={"cchip" + (x.done ? ' done' : '') + (ghost && drag.current && drag.current.sid === x.id ? ' lift' : '')}
+                <div key={x.id} className={"cchip" + (x.done || matches[x.id] ? ' done' : '') + (ghost && drag.current && drag.current.sid === x.id ? ' lift' : '')}
                      style={{ '--c': DISC[x.discipline].color }} onPointerDown={(e)=>onChipDown(e, w, x, iso)} onContextMenu={(e)=>e.preventDefault()}>
                   {chipLabel(x, templates)}
                 </div>
@@ -1646,18 +1683,19 @@ function Calendar({ program, profile, todayStr, templates, onToggle, onEdit, onA
       <h2 className="daytitle" style={{ marginTop: 22 }}>{longDate(parse(selDay))}</h2>
       {dayList.length === 0 && <p className="rest" style={{ marginBottom: 10 }}>Rien de prévu.</p>}
       {dayList.map(({ s: x, w }) => (
-        <div key={x.id} className={"srow" + (x.done ? ' done' : '')} style={{ '--c': DISC[x.discipline].color }}>
+        <div key={x.id} className={"srow" + (x.done || matches[x.id] ? ' done' : '')} style={{ '--c': DISC[x.discipline].color }}>
           <div className="m">
             <button className="t" onClick={()=>onEdit(w, x.id)} aria-label={'Modifier : ' + x.desc}>
               <b>{chipLabel(x, templates)}</b>
               <span>{x.desc}</span>
               {x.target && <em>{x.target}</em>}
+              {matches[x.id] && <em className="realised">Réalisée : {actSummary(matches[x.id])}</em>}
             </button>
             {x.templateId && templates.some(t => t.id === x.templateId) && (
               <button className="openlink" onClick={()=>onOpenMuscu(x.templateId, { wIdx: w, sid: x.id })}>Voir les exercices</button>
             )}
           </div>
-          <button className="mini" aria-label={x.done ? 'Marquer comme non faite' : 'Marquer comme faite'} aria-pressed={x.done} onClick={()=>onToggle(w, x.id)}>
+          <button className="mini" aria-label={matches[x.id] ? 'Validée automatiquement par Intervals.icu' : x.done ? 'Marquer comme non faite' : 'Marquer comme faite'} aria-pressed={!!(x.done || matches[x.id])} disabled={!!matches[x.id]} onClick={()=>onToggle(w, x.id)}>
             <span className="c"><Icon name="check" size={15} sw={3} /></span>
           </button>
         </div>
@@ -2160,6 +2198,7 @@ function App(){
   const [icuConn, setIcuConn] = useState(() => loadIcuConn() || (window.ALLURE_DEMO ? { apiKey: 'demo' } : null));
   const emptyIcu = { status: 'idle', activities: [], wellness: [], stubs: 0, fetchedAt: null, from: '' };
   const [icu, setIcu] = useState(() => { const c = loadIcuCache(); return c && c.from === rangeFrom(fmt(new Date())) ? { ...c, status: 'idle' } : emptyIcu; });
+  const matches = useMemo(() => matchActivities(program, profile.programStart, icuConn ? icu.activities : []), [program, profile.programStart, icu, icuConn]);
   const [todayStr, setTodayStr] = useState(fmt(new Date()));
   const [sel, setSel] = useState(fmt(new Date()));
   const [sheet, setSheet] = useState(null);
@@ -2343,8 +2382,8 @@ function App(){
   return (
     <div>
       <main className="shell">
-        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })} />}
-        {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} onToggle={toggleSession}
+        {page==='today' && <Today workouts={workouts} program={program} profile={profile} todayStr={todayStr} sel={sel} setSel={setSel} templates={templates} onOpenMuscu={(id, from)=>openMuscu(id, from)} icuConn={icuConn} icu={icu} onRefreshIcu={()=>refreshIcu()} onToggle={toggleSession} onSettings={openSettings} steps={steps} onSaveSteps={saveSteps} matches={matches} onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })} />}
+        {page==='plan' && <Calendar program={program} profile={profile} todayStr={todayStr} templates={templates} matches={matches} onToggle={toggleSession}
             onEdit={(wIdx, sid)=>setSheet({ type:'session', wIdx, sid })}
             onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
             onMove={(wIdx, sid, iso)=>placeSession(wIdx, sid, iso)}
