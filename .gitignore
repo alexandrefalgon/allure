@@ -1,0 +1,13 @@
+# OS / éditeur
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Dépendances / build local
+node_modules/
+*.log
+
+# Sauvegardes exportées depuis l'app
+allure-backup*.json
+allure-20*.json

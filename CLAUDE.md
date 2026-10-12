@@ -41,4 +41,9 @@ Alexandre n'a aucune compétence en code : explique simplement, en français, et
 - Avant de livrer : vérifier qu'il n'y a pas d'erreur console, que `npm run build` passe, que l'ancien état (`allure_state_v1`) se charge toujours.
 
 ## Livraison
-Travaille sur une branche, ouvre une pull request avec un résumé clair en français (ce qui change pour l'utilisateur, ce qui a été testé). Alexandre fusionne la PR ; GitHub Pages redéploie en environ une minute.
+Choix d'Alexandre (octobre 2026) : **mise en ligne directe sur `main`**, sans pull request, pour qu'il n'ait rien à faire sur GitHub.
+1. Faire la modification, `npm run build`, incrémenter `CACHE` dans `sw.js`.
+2. Tester (mode démo, pas d'erreur console, ancien état chargé) **avant** de pousser : chaque push sur `main` est en ligne environ une minute après.
+3. Commit avec un message clair en français, puis `git push origin main`.
+4. Expliquer à Alexandre ce qui a changé et lui rappeler d'ouvrir l'app deux fois sur le téléphone.
+En cas de problème après mise en ligne, revenir en arrière avec `git revert` (jamais de `push --force`).
