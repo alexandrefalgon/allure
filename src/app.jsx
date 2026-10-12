@@ -1548,13 +1548,13 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
         <p className="rest">{week ? 'Repos.' : 'Rien de prévu.'}</p>
       )}
       </div>
-      <div className="wgrid" style={{ marginTop: 26 }}>
+      {icuConn && icu.fetchedAt && <Dash icu={icu} todayStr={todayStr} />}
+      <div className="wgrid" style={{ marginTop: icuConn && icu.fetchedAt ? 12 : 26 }}>
         <Card title="Pas" sub={stepsToday ? "Aujourd'hui" : "Touche pour saisir tes pas"} wide onClick={() => setStepsOpen(true)}>
           <p className="num">{stepsToday ? nFr(stepsToday) : '–'}</p>
           <Spark values={stepsWeek} bars min0={10000} />
         </Card>
       </div>
-      {icuConn && icu.fetchedAt && <Dash icu={icu} todayStr={todayStr} />}
       {stepsOpen && <StepsSheet data={stepsData} manual={steps} todayStr={todayStr} onSave={onSaveSteps} onClose={() => setStepsOpen(false)} />}
       {openAct && icuConn && <ActivityModal act={openAct} conn={icuConn} onClose={()=>setOpenAct(null)} />}
     </div>
