@@ -2238,16 +2238,224 @@ function MuscuJournal({ workouts }){
   );
 }
 
-function MuscuHome({ templates, workouts, onOpen, onNew, onSettings }){
+
+/* ---------- Base d'exercices de musculation (en français) ----------
+   Format : Nom | Nom anglais | Groupe | Muscles principaux | Muscles secondaires | Matériel | Exécution | Autres noms (séparés par « ; »)
+   Les noms suivent la même logique que tes séances (« Exercice – Matériel ») pour se raccorder au journal. */
+const EXO_RAW = `
+Développé couché – Barre | Barbell bench press | Pectoraux | Pectoraux | Triceps, Épaules (avant) | Barre | Allongé, omoplates serrées et pieds ancrés, descends la barre au milieu de la poitrine puis pousse sans décoller les fesses.
+Développé couché à la Smith machine | Smith machine bench press | Pectoraux | Pectoraux | Triceps, Épaules (avant) | Smith machine | La barre est guidée : descends-la vers le bas des pectoraux et pousse en gardant les omoplates serrées.
+Développé couché – Haltères | Dumbbell bench press | Pectoraux | Pectoraux | Triceps, Épaules (avant) | Haltères | Descends les haltères de chaque côté de la poitrine, coudes à environ 45° du buste, puis pousse en les rapprochant en haut.
+Développé couché – Position inclinée | Incline dumbbell press | Pectoraux | Pectoraux (haut), Épaules (avant) | Triceps | Haltères | Banc incliné autour de 30° : pousse les haltères au-dessus du haut de la poitrine sans cambrer le dos.
+Développé incliné – Barre | Incline barbell bench press | Pectoraux | Pectoraux (haut), Épaules (avant) | Triceps | Barre | Banc incliné : descends la barre vers le haut de la poitrine puis pousse en ligne droite.
+Développé décliné – Barre | Decline barbell bench press | Pectoraux | Pectoraux (bas) | Triceps | Barre | Banc décliné, pieds bien calés : descends la barre vers le bas de la poitrine et pousse en contrôle.
+Écarté – Haltères | Dumbbell fly | Pectoraux | Pectoraux | Épaules (avant) | Haltères | Bras légèrement fléchis, ouvre en arc de cercle jusqu'à sentir l'étirement des pectoraux, puis referme comme pour enlacer un arbre.
+Écarté incliné – Haltères | Incline dumbbell fly | Pectoraux | Pectoraux (haut) | Épaules (avant) | Haltères | Même geste que l'écarté, sur banc incliné, pour cibler le haut des pectoraux.
+Écarté à la poulie vis-à-vis | Cable crossover | Pectoraux | Pectoraux | Épaules (avant) | Poulie | Debout entre deux poulies, ramène les mains devant toi, coudes légèrement fléchis. Poulies hautes : bas des pectoraux ; poulies basses : haut.
+Pec deck – Machine | Pec deck machine fly | Pectoraux | Pectoraux | Épaules (avant) | Machine | Assis dos calé, rapproche les poignées devant toi en serrant les pectoraux, puis reviens lentement.
+Développé assis – Machine | Chest press machine | Pectoraux | Pectoraux | Triceps, Épaules (avant) | Machine | Règle le siège pour que les poignées soient à hauteur de poitrine, pousse sans verrouiller les coudes.
+Pompes | Push-up | Pectoraux | Pectoraux | Triceps, Épaules (avant), Abdominaux | Poids du corps | Corps gainé comme une planche, descends la poitrine près du sol, coudes à environ 45°, puis repousse.
+Pompes pieds surélevés | Decline push-up | Pectoraux | Pectoraux (haut), Épaules (avant) | Triceps | Poids du corps | Pieds posés sur un banc : même geste que les pompes, avec plus de travail sur le haut des pectoraux.
+Dips – Pectoraux | Chest dips | Pectoraux | Pectoraux (bas) | Triceps, Épaules (avant) | Poids du corps | Sur barres parallèles, buste penché en avant, descends jusqu'à sentir l'étirement de la poitrine puis pousse.
+Pull-over – Haltère | Dumbbell pullover | Pectoraux | Pectoraux | Dos (grand dorsal), Triceps | Haltères | Allongé, haltère tenu à deux mains au-dessus de la poitrine : descends-le derrière la tête, bras presque tendus, puis ramène-le.
+
+Traction | Pull-up | Dos | Dos (grand dorsal) | Biceps, Avant-bras | Poids du corps | Suspendu, prise pronation un peu plus large que les épaules : tire le menton au-dessus de la barre en serrant les omoplates.
+Traction – Supination | Chin-up | Dos | Dos (grand dorsal), Biceps | Avant-bras | Poids du corps | Paumes vers toi, même mouvement que la traction avec plus d'implication des biceps.
+Traction – Prise neutre | Neutral-grip pull-up | Dos | Dos (grand dorsal) | Biceps | Poids du corps | Poignées parallèles, paumes face à face : tire la poitrine vers les mains, coudes vers le bas.
+Tirage poitrine – Avant | Lat pulldown | Dos | Dos (grand dorsal) | Biceps | Poulie | Assis, cuisses calées : tire la barre vers le haut de la poitrine en abaissant les coudes, sans te balancer.
+Tirage poitrine – Prise serrée | Close-grip lat pulldown | Dos | Dos (grand dorsal) | Biceps | Poulie | Avec une poignée serrée, tire vers la poitrine en gardant les coudes près du corps.
+Tirage vertical – Prise neutre | Neutral-grip pulldown | Dos | Dos (grand dorsal) | Biceps | Poulie | Poignées parallèles : tire vers le haut de la poitrine, buste légèrement incliné vers l'arrière.
+Rameur buste penché – Barre | Bent-over barbell row | Dos | Dos (grand dorsal, trapèzes, rhomboïdes) | Biceps, Lombaires | Barre | Buste incliné à environ 45°, dos plat : tire la barre vers le bas du ventre en serrant les omoplates.
+Rameur – Un bras – Haltère | One-arm dumbbell row | Dos | Dos (grand dorsal) | Biceps | Haltères | Une main et un genou sur le banc, tire l'haltère vers la hanche, coude près du corps ; fais les deux côtés. | Rameur – Un bras – G – Haltère; Rameur – Un bras – D – Haltère
+Rowing T-bar | T-bar row | Dos | Dos (grand dorsal, trapèzes) | Biceps, Lombaires | Barre | Buste incliné, dos plat : tire la charge vers la poitrine puis redescends sous contrôle.
+Rowing assis – Poulie basse | Seated cable row | Dos | Dos (grand dorsal, rhomboïdes) | Biceps | Poulie | Assis, dos droit : tire la poignée vers le ventre en serrant les omoplates, sans balancer le buste.
+Rowing assis – Machine | Seated row machine | Dos | Dos (grand dorsal, rhomboïdes) | Biceps | Machine | Poitrine contre le support, tire les poignées vers toi en ramenant les coudes en arrière.
+Rowing Pendlay – Barre | Pendlay row | Dos | Dos (grand dorsal, trapèzes) | Biceps, Lombaires | Barre | Barre reposée au sol à chaque répétition, buste parallèle au sol : tire-la vite vers le bas de la poitrine.
+Rowing inversé | Inverted row | Dos | Dos (grand dorsal, rhomboïdes) | Biceps, Abdominaux | Poids du corps | Sous une barre basse, corps gainé : tire la poitrine vers la barre.
+Pull-over à la poulie | Straight-arm pulldown | Dos | Dos (grand dorsal) | Triceps (longue portion) | Poulie | Bras presque tendus, ramène la barre vers les cuisses en gardant le buste légèrement penché.
+Soulevé de terre – Barre | Conventional deadlift | Dos | Lombaires, Fessiers, Ischio-jambiers | Trapèzes, Quadriceps, Avant-bras | Barre | Barre contre les tibias, dos plat : pousse le sol avec les jambes et verrouille les hanches en haut ; redescends en contrôle.
+Shrugs – Haltères | Dumbbell shrug | Dos | Trapèzes | Avant-bras | Haltères | Debout, hausse les épaules droit vers les oreilles sans rouler, marque une pause en haut.
+Shrugs – Barre | Barbell shrug | Dos | Trapèzes | Avant-bras | Barre | Même geste avec une barre devant les cuisses, bras tendus.
+Hyperextension | Back extension | Dos | Lombaires | Fessiers, Ischio-jambiers | Machine | Hanches calées sur le banc, descends le buste puis remonte jusqu'à l'alignement, sans cambrer en haut.
+
+Développé militaire – Barre | Overhead barbell press | Épaules | Épaules (deltoïdes) | Triceps, Pectoraux (haut), Abdominaux | Barre | Debout, abdos gainés : pousse la barre au-dessus de la tête en passant le visage, sans cambrer.
+Développé militaire – Position assise | Seated dumbbell shoulder press | Épaules | Épaules (deltoïdes) | Triceps | Haltères | Assis dos calé, pousse les haltères au-dessus de la tête puis redescends à hauteur des oreilles.
+Développé Arnold | Arnold press | Épaules | Épaules (deltoïdes) | Triceps | Haltères | Pars paumes vers toi devant la poitrine et tourne-les vers l'avant pendant la poussée.
+Développé épaules – Machine | Shoulder press machine | Épaules | Épaules (deltoïdes) | Triceps | Machine | Règle le siège pour que les poignées soient à hauteur d'épaules et pousse sans verrouiller les coudes.
+Développé derrière la nuque – Barre | Behind-the-neck press | Épaules | Épaules (deltoïdes), Trapèzes | Triceps | Barre | Réservé aux épaules très mobiles : charge légère, descends la barre juste derrière la tête, sans forcer.
+Push press – Barre | Push press | Épaules | Épaules (deltoïdes) | Triceps, Quadriceps | Barre | Fléchis légèrement les jambes puis étends-les d'un coup pour projeter la barre au-dessus de la tête.
+Élévation latérale des épaules | Dumbbell lateral raise | Épaules | Épaules (côté) | Trapèzes | Haltères | Bras légèrement fléchis, monte les haltères sur les côtés jusqu'à hauteur d'épaules, sans élan.
+Élévation latérale – Câble | Cable lateral raise | Épaules | Épaules (côté) | Trapèzes | Poulie | Poulie basse, main opposée : monte le bras sur le côté jusqu'à l'épaule, tension constante. | Élévation latérale – Câble – D; Élévation latérale – Câble – G
+Élévation latérale – Machine | Lateral raise machine | Épaules | Épaules (côté) | Trapèzes | Machine | Coudes contre les coussins, écarte les bras jusqu'à l'horizontale puis reviens lentement.
+Élévation frontale – Haltères | Dumbbell front raise | Épaules | Épaules (avant) | Pectoraux (haut) | Haltères | Monte l'haltère devant toi jusqu'à hauteur d'épaule, sans balancer.
+Élévation frontale – Barre | Barbell front raise | Épaules | Épaules (avant) | Pectoraux (haut) | Barre | Prise pronation, monte la barre devant toi à hauteur d'épaules avec une charge légère.
+Oiseau – Haltères | Bent-over rear delt fly | Épaules | Épaules (arrière) | Dos (rhomboïdes), Trapèzes | Haltères | Buste penché, dos plat : écarte les bras sur les côtés en serrant les omoplates.
+Oiseau – Machine | Reverse pec deck | Épaules | Épaules (arrière) | Dos (rhomboïdes) | Machine | Face au dossier, écarte les poignées vers l'arrière, bras presque tendus.
+Tirage vers le visage avec câble | Face pull | Épaules | Épaules (arrière), Coiffe des rotateurs | Dos (trapèzes, rhomboïdes) | Poulie | Poulie à hauteur du visage : tire la corde vers le front en écartant les coudes.
+Tirage menton – Barre | Upright row | Épaules | Épaules (côté), Trapèzes | Biceps | Barre | Prise un peu plus large que les épaules, monte la barre le long du corps jusqu'à la poitrine, coudes au-dessus des mains.
+
+Flexion des biceps – Haltère | Dumbbell curl | Biceps | Biceps | Avant-bras | Haltères | Debout, coudes collés au buste, paumes vers le haut : monte l'haltère vers l'épaule puis redescends lentement.
+Flexion des biceps – Barre | Barbell curl | Biceps | Biceps | Avant-bras | Barre | Coudes fixes le long du corps, monte la barre vers les épaules sans balancer le buste.
+Flexion des biceps – Barre EZ | EZ-bar curl | Biceps | Biceps | Avant-bras | Barre EZ | La barre coudée soulage les poignets : même mouvement, coudes fixes.
+Curl marteau – Haltères | Hammer curl | Biceps | Biceps (brachial), Avant-bras | | Haltères | Paumes face à face tout au long du mouvement : cible le muscle sous le biceps et l'avant-bras.
+Curl concentré – Haltère | Concentration curl | Biceps | Biceps | Avant-bras | Haltères | Assis, coude calé contre l'intérieur de la cuisse : monte l'haltère vers l'épaule puis redescends lentement.
+Curl pupitre – Barre EZ | Preacher curl | Biceps | Biceps | Avant-bras | Barre EZ | Bras posés sur le pupitre : monte la barre sans décoller les coudes, redescends sans verrouiller.
+Curl incliné – Haltères | Incline dumbbell curl | Biceps | Biceps (longue portion) | Avant-bras | Haltères | Allongé sur un banc incliné, bras pendants : monte les haltères en gardant les coudes en arrière du buste.
+Curl à la poulie basse | Cable curl | Biceps | Biceps | Avant-bras | Poulie | Face à la poulie basse, monte la poignée vers les épaules : tension constante sur tout le mouvement.
+Curl araignée – Haltères | Spider curl | Biceps | Biceps | Avant-bras | Haltères | Poitrine sur un banc incliné, bras pendants à la verticale : monte les haltères sans élan.
+
+Extension des triceps | Overhead dumbbell triceps extension | Triceps | Triceps | | Haltères | Un haltère tenu à deux mains au-dessus de la tête : plie les coudes pour le descendre derrière la tête puis étends les bras.
+Extension triceps à la poulie – Corde | Rope triceps pushdown | Triceps | Triceps | | Poulie | Coudes collés au corps, pousse la corde vers le bas en écartant les mains en bas du mouvement.
+Extension triceps à la poulie – Barre | Cable triceps pushdown | Triceps | Triceps | | Poulie | Coudes collés au corps, pousse la barre vers le bas jusqu'à l'extension complète.
+Extension triceps au-dessus de la tête – Poulie | Overhead cable triceps extension | Triceps | Triceps (longue portion) | | Poulie | Dos à la poulie, corde derrière la tête : étends les bras vers l'avant et le haut.
+Barre au front – Barre EZ | Skull crusher | Triceps | Triceps | Épaules (avant) | Barre EZ | Allongé, descends la barre vers le front en ne bougeant que les avant-bras, puis étends les bras.
+Kickback triceps – Haltère | Triceps kickback | Triceps | Triceps | | Haltères | Buste penché, bras collé au corps : étends le coude vers l'arrière sans balancer l'haltère.
+Dips – Triceps | Triceps dips | Triceps | Triceps | Pectoraux, Épaules (avant) | Poids du corps | Corps vertical sur barres parallèles ou banc : descends jusqu'à environ 90° aux coudes puis pousse.
+Développé couché – Prise serrée | Close-grip bench press | Triceps | Triceps | Pectoraux, Épaules (avant) | Barre | Mains un peu plus rapprochées que les épaules, coudes près du corps : descends la barre vers le bas de la poitrine.
+Pompes diamant | Diamond push-up | Triceps | Triceps | Pectoraux, Épaules (avant) | Poids du corps | Mains rapprochées sous la poitrine, pouces et index en losange : pompe en gardant les coudes près du corps.
+
+Curl poignets – Barre | Wrist curl | Avant-bras | Avant-bras (fléchisseurs) | | Barre | Avant-bras posés sur un banc, paumes vers le haut : fléchis les poignets pour monter la barre.
+Curl inversé – Barre EZ | Reverse curl | Avant-bras | Avant-bras, Biceps (brachial) | | Barre EZ | Prise pronation : monte la barre vers les épaules, coudes fixes.
+Marche du fermier | Farmer's walk | Avant-bras | Avant-bras, Trapèzes | Abdominaux, Fessiers | Haltères | Deux charges lourdes en main, marche droit, épaules basses et buste gainé.
+
+Squat arrière – Barre | Back squat | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers, Lombaires, Abdominaux | Barre | Barre sur les trapèzes, descends hanches en arrière et genoux vers l'extérieur jusqu'à la profondeur voulue, puis remonte en poussant le sol.
+Squat avant – Barre | Front squat | Quadriceps | Quadriceps | Fessiers, Abdominaux | Barre | Barre sur l'avant des épaules, coudes hauts : descends en gardant le buste très droit.
+Squat à la Smith machine | Smith machine squat | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers | Smith machine | Pieds légèrement devant la barre, descends en contrôle puis remonte sans verrouiller brutalement les genoux.
+Squat gobelet – Haltère | Goblet squat | Quadriceps | Quadriceps, Fessiers | Abdominaux | Haltères | Haltère tenu contre la poitrine : descends buste droit, coudes entre les genoux, puis remonte.
+Presse à cuisses | Leg press | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers | Machine | Dos plaqué, pieds à largeur d'épaules : descends jusqu'à environ 90° aux genoux et pousse sans les verrouiller.
+Hack squat – Machine | Hack squat | Quadriceps | Quadriceps | Fessiers | Machine | Dos contre le dossier : descends en contrôle et pousse en gardant les talons au sol.
+Fente bulgare – Haltères | Bulgarian split squat | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers | Haltères | Pied arrière posé sur un banc : descends à la verticale sur la jambe avant, buste droit.
+Fente marchée – Haltères | Walking lunge | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers | Haltères | Avance d'un grand pas, descends le genou arrière près du sol, puis enchaîne avec l'autre jambe.
+Fente – En alternance – Haltère | Alternating lunge | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers | Haltères | Sur place, alterne une fente à gauche et à droite en gardant le buste droit.
+Fente arrière – Haltères | Reverse lunge | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers | Haltères | Recule un pied, descends le genou arrière près du sol puis reviens : plus doux pour les genoux que la fente avant.
+Montée sur banc – Haltères | Step-up | Quadriceps | Quadriceps, Fessiers | Ischio-jambiers | Haltères | Monte sur un banc en poussant avec la jambe avant, sans t'aider de la jambe arrière, puis redescends en contrôle.
+Extension des jambes | Leg extension | Quadriceps | Quadriceps | | Machine | Assis, étends les jambes jusqu'à presque verrouiller les genoux, puis redescends lentement.
+Sissy squat | Sissy squat | Quadriceps | Quadriceps | | Poids du corps | Penche le buste en arrière en avançant les genoux, talons relevés : exercice avancé, à faire avec précaution.
+
+Soulevé de terre roumain – Barre | Romanian deadlift | Ischio-jambiers | Ischio-jambiers, Fessiers | Lombaires | Barre | Jambes presque tendues, recule les hanches en gardant la barre contre les cuisses jusqu'à l'étirement des ischios, puis reviens.
+Soulevé de terre jambes tendues – Haltères | Stiff-leg deadlift | Ischio-jambiers | Ischio-jambiers | Fessiers, Lombaires | Haltères | Descends les haltères le long des jambes, dos plat, jusqu'à sentir l'étirement à l'arrière des cuisses.
+Flexion des jambes couché | Lying leg curl | Ischio-jambiers | Ischio-jambiers | Mollets | Machine | Allongé sur le ventre, ramène les talons vers les fesses sans décoller les hanches.
+Flexion des jambes assis | Seated leg curl | Ischio-jambiers | Ischio-jambiers | Mollets | Machine | Assis, plie les genoux pour ramener les talons sous toi, puis reviens lentement.
+Nordic curl | Nordic hamstring curl | Ischio-jambiers | Ischio-jambiers | Fessiers | Poids du corps | Genoux au sol, pieds bloqués : descends le buste vers l'avant le plus lentement possible, puis remonte avec l'aide des bras.
+Good morning – Barre | Good morning | Ischio-jambiers | Ischio-jambiers, Lombaires | Fessiers | Barre | Barre sur les trapèzes, penche le buste en reculant les hanches, dos plat, puis redresse-toi.
+Soulevé de terre sumo – Barre | Sumo deadlift | Fessiers | Fessiers, Quadriceps (intérieur) | Ischio-jambiers, Lombaires | Barre | Pieds très écartés, prise étroite entre les jambes : pousse le sol et verrouille les hanches en haut.
+
+Hip thrust – Barre | Barbell hip thrust | Fessiers | Fessiers | Ischio-jambiers | Barre | Haut du dos sur un banc, barre sur les hanches : pousse les hanches vers le haut en serrant les fessiers, menton rentré.
+Pont fessier | Glute bridge | Fessiers | Fessiers | Ischio-jambiers | Poids du corps | Allongé, pieds près des fesses : monte le bassin en serrant les fessiers, pause en haut.
+Abduction hanche – Machine | Hip abduction machine | Fessiers | Fessiers (moyen) | | Machine | Assis, écarte les jambes contre la résistance puis reviens sans à-coup.
+Kickback fessier – Poulie | Cable glute kickback | Fessiers | Fessiers | Ischio-jambiers | Poulie | Sangle à la cheville, envoie la jambe vers l'arrière sans cambrer le bas du dos.
+Squat sumo – Haltère | Sumo squat | Fessiers | Fessiers, Quadriceps | Adducteurs | Haltères | Pieds écartés, pointes vers l'extérieur, haltère entre les jambes : descends en gardant le buste droit.
+
+Élévation de mollets – Debout | Standing calf raise | Mollets | Mollets (gastrocnémiens) | | Machine | Monte sur la pointe des pieds au maximum, pause en haut, puis redescends en étirant bien les mollets.
+Élévation de mollets – Assis | Seated calf raise | Mollets | Mollets (soléaire) | | Machine | Genoux fléchis à 90° : monte sur la pointe des pieds puis redescends lentement.
+Élévation de mollets – Presse à cuisses | Leg press calf raise | Mollets | Mollets | | Machine | Sur la presse, pointes de pieds en bas du plateau : pousse sur les avant-pieds sans verrouiller les genoux.
+Élévation de mollets – Une jambe | Single-leg calf raise | Mollets | Mollets | | Poids du corps | Sur une marche, une jambe à la fois : monte haut puis descends sous le niveau de la marche.
+
+Crunch | Crunch | Abdominaux | Abdominaux (grand droit) | | Poids du corps | Allongé, genoux fléchis : enroule le haut du dos vers le bassin sans tirer sur la nuque.
+Crunch à la poulie | Cable crunch | Abdominaux | Abdominaux (grand droit) | | Poulie | À genoux face à la poulie, enroule le buste vers le bas en arrondissant le dos, hanches fixes.
+Crunch inversé | Reverse crunch | Abdominaux | Abdominaux (bas) | | Poids du corps | Allongé, ramène les genoux vers la poitrine en décollant le bassin, puis redescends lentement.
+Relevé de jambes suspendu | Hanging leg raise | Abdominaux | Abdominaux (bas), Fléchisseurs de hanche | Avant-bras | Poids du corps | Suspendu à une barre, monte les jambes tendues sans balancer, puis redescends en contrôle.
+Relevé de genoux suspendu | Hanging knee raise | Abdominaux | Abdominaux (bas) | Fléchisseurs de hanche | Poids du corps | Suspendu, monte les genoux vers la poitrine en enroulant le bassin.
+Planche | Plank | Abdominaux | Abdominaux (transverse) | Épaules, Fessiers | Poids du corps | Sur les avant-bras, corps aligné de la tête aux talons : serre les abdos et les fessiers, respire normalement.
+Planche latérale | Side plank | Abdominaux | Obliques | Épaules, Fessiers | Poids du corps | Sur un avant-bras, corps aligné : tiens la position sans laisser tomber les hanches.
+Roue abdominale | Ab wheel rollout | Abdominaux | Abdominaux | Épaules, Dos (grand dorsal) | Poids du corps | À genoux, fais rouler la roue vers l'avant en gardant le dos plat, puis reviens en contractant les abdos.
+Russian twist | Russian twist | Abdominaux | Obliques | Abdominaux | Poids du corps | Assis, buste incliné en arrière, tourne le buste d'un côté puis de l'autre, avec ou sans charge.
+Mountain climbers | Mountain climbers | Abdominaux | Abdominaux | Épaules, Quadriceps | Poids du corps | En position de pompe, ramène les genoux vers la poitrine en alternance, à rythme soutenu.
+Bûcheron à la poulie | Cable woodchop | Abdominaux | Obliques | Épaules, Fessiers | Poulie | Tire la poignée en diagonale, de haut en bas ou l'inverse, en pivotant le buste et les hanches.
+Dead bug | Dead bug | Abdominaux | Abdominaux (transverse) | | Poids du corps | Allongé, bras et genoux en l'air : étends bras et jambe opposés en gardant le bas du dos plaqué au sol.
+Bird dog | Bird dog | Abdominaux | Lombaires, Abdominaux | Fessiers, Épaules | Poids du corps | À quatre pattes, étends un bras et la jambe opposée sans bouger le bassin.
+Pallof press | Pallof press | Abdominaux | Abdominaux (anti-rotation) | Épaules | Poulie | De profil à la poulie, pousse les mains devant toi sans que le buste tourne.
+
+Kettlebell swing | Kettlebell swing | Corps entier | Fessiers, Ischio-jambiers | Lombaires, Épaules, Abdominaux | Kettlebell | Pousse les hanches vers l'avant pour projeter le kettlebell à hauteur de poitrine, bras relâchés.
+Thruster – Haltères | Dumbbell thruster | Corps entier | Quadriceps, Épaules | Fessiers, Triceps | Haltères | Squat avec les haltères sur les épaules, puis pousse-les au-dessus de la tête en te relevant.
+Burpees | Burpee | Corps entier | Pectoraux, Quadriceps | Épaules, Abdominaux | Poids du corps | Descends en pompe au sol, remonte en saut, bras au-dessus de la tête.
+Turkish get-up | Turkish get-up | Corps entier | Épaules, Abdominaux | Fessiers, Quadriceps | Kettlebell | Allongé avec une charge au bras tendu, relève-toi en plusieurs étapes jusqu'à la station debout, puis redescends.
+Soulevé de terre – Barre hexagonale | Trap bar deadlift | Corps entier | Quadriceps, Fessiers, Ischio-jambiers | Trapèzes, Lombaires | Barre | Debout dans la barre hexagonale, dos plat : pousse le sol avec les jambes et redresse-toi.
+Saut sur box | Box jump | Corps entier | Quadriceps, Fessiers | Mollets | Poids du corps | Saute à pieds joints sur la box, réceptionne-toi en douceur et redescends en marchant.
+`;
+const EXO_GROUPS = ['Pectoraux', 'Dos', 'Épaules', 'Biceps', 'Triceps', 'Avant-bras', 'Quadriceps', 'Ischio-jambiers', 'Fessiers', 'Mollets', 'Abdominaux', 'Corps entier'];
+const normEx = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const EXERCISES = EXO_RAW.split('\n').filter(l => l.trim()).map((l, i) => {
+  const c = l.split('|').map(x => x.trim());
+  return { id: 'ex' + i, nom: c[0], en: c[1], grp: c[2], prim: c[3] ? c[3].split(',').map(x => x.trim()) : [], sec: c[4] ? c[4].split(',').map(x => x.trim()) : [], mat: c[5], how: c[6], alias: c[7] ? c[7].split(';').map(x => x.trim()) : [] };
+});
+EXERCISES.forEach(e => { e.nomN = normEx(e.nom); e.primN = normEx(e.prim.join(' ')); e.keys = [e.nom, ...e.alias].map(normEx); e.hay = normEx([e.nom, e.en, e.grp, e.prim.join(' '), e.sec.join(' '), e.mat].join(' ')); });
+const EXO_MATS = [...new Set(EXERCISES.map(e => e.mat))].sort((a, b) => a.localeCompare(b, 'fr'));
+const findExercise = (name) => { const k = normEx(name); return EXERCISES.find(e => e.keys.includes(k)) || null; };
+
+function ExerciseInfoSheet({ ex, workouts, templates, onAddExercise, onClose }){
+  const [added, setAdded] = useState('');
+  const hist = useMemo(() => buildJournal(workouts).find(j => ex.keys.includes(normEx(j.name))), [workouts, ex]);
+  return (
+    <Sheet title={ex.nom} onClose={onClose}>
+      <p className="exen">{ex.en} · {ex.grp} · {ex.mat}</p>
+      <div className="exmus">
+        <p><b>Muscles principaux</b>{ex.prim.join(', ')}</p>
+        {ex.sec.length > 0 && <p><b>Muscles secondaires</b>{ex.sec.join(', ')}</p>}
+      </div>
+      <h3 className="subh">Exécution</h3>
+      <p className="exhow">{ex.how}</p>
+      {hist && (
+        <div className="hist-stats" style={{ marginTop: 16 }}>
+          <div><b>{topStr(hist, hist.last)}</b><span>Dernière séance</span></div>
+          <div><b>{hist.weighted ? fmtKg(hist.best) : hist.best + ' reps'}</b><span>Record</span></div>
+          <div><b>{hist.h.length}</b><span>{hist.h.length > 1 ? 'séances' : 'séance'}</span></div>
+        </div>
+      )}
+      <h3 className="subh">Ajouter à une séance</h3>
+      <div className="exadd">{templates.map(t => <button key={t.id} className="fchip" onClick={() => { onAddExercise(t.id, ex); setAdded(t.name); }}>{t.name}</button>)}</div>
+      {added && <p className="note" role="status" style={{ marginTop: 10 }}>Ajouté à « {added} » avec 3 séries de 10. Ouvre la séance pour régler les charges.</p>}
+    </Sheet>
+  );
+}
+
+function ExerciseLibrary({ workouts, templates, onPick, onAddExercise }){
+  const [q, setQ] = useState('');
+  const [grp, setGrp] = useState('');
+  const [mat, setMat] = useState('');
+  const [open, setOpen] = useState(null);
+  const k = normEx(q);
+  const ws = k ? k.split(' ') : [];
+  const score = (e) => ws.every(w => e.nomN.includes(w)) ? 0 : ws.every(w => e.primN.includes(w)) ? 1 : 2;
+  const list = EXERCISES.filter(e => (!grp || e.grp === grp) && (!mat || e.mat === mat) && (!k || ws.every(w => e.hay.includes(w)))).map((e, i) => ({ e, i, sc: k ? score(e) : 0 })).sort((a, b) => a.sc - b.sc || a.i - b.i).map(x => x.e);
+  return (
+    <div>
+      <input type="search" placeholder="Rechercher un exercice, un muscle…" aria-label="Rechercher un exercice" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="chiprow" role="tablist" aria-label="Groupe musculaire">
+        {['', ...EXO_GROUPS].map(g => <button key={g || 'all'} role="tab" aria-selected={grp === g} className={'fchip' + (grp === g ? ' on' : '')} onClick={() => setGrp(g)}>{g || 'Tous'}</button>)}
+      </div>
+      <label className="f" htmlFor="exo-mat">Matériel</label>
+      <select id="exo-mat" value={mat} onChange={(e) => setMat(e.target.value)}>
+        <option value="">Tout le matériel</option>
+        {EXO_MATS.map(m => <option key={m} value={m}>{m}</option>)}
+      </select>
+      <p className="note" style={{ margin: '12px 0 8px' }}>{list.length} exercice{list.length > 1 ? 's' : ''}</p>
+      {list.length === 0 && <p className="empty">Aucun exercice ne correspond.</p>}
+      {list.map(e => (
+        <button key={e.id} className="tcard jr exrow" onClick={() => onPick ? onPick(e) : setOpen(e)}>
+          <div>
+            <h3>{e.nom}</h3>
+            <p>{e.prim.join(' · ')}</p>
+          </div>
+          <span className="exmat">{e.mat}</span>
+        </button>
+      ))}
+      {open && <ExerciseInfoSheet ex={open} workouts={workouts} templates={templates} onAddExercise={onAddExercise} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+function MuscuHome({ templates, workouts, onOpen, onNew, onSettings, onAddExercise }){
   const [tab, setTab] = useState('seances');
   return (
     <div>
       <Header title="Musculation" sub={templates.length + (templates.length > 1 ? ' séances' : ' séance')} onSettings={onSettings} />
-      <div className="seg" role="tablist" aria-label="Musculation">
-        <button role="tab" aria-selected={tab === 'seances'} className={tab === 'seances' ? 'on' : ''} onClick={() => setTab('seances')}>Séances</button>
-        <button role="tab" aria-selected={tab === 'journal'} className={tab === 'journal' ? 'on' : ''} onClick={() => setTab('journal')}>Journal</button>
+      <div className="seg three" role="tablist" aria-label="Musculation" style={{ marginBottom: 14 }}>
+        {[['seances', 'Séances'], ['journal', 'Journal'], ['exos', 'Exercices']].map(([v, l]) => <button key={v} role="tab" aria-selected={tab === v} className={tab === v ? 'on' : ''} onClick={() => setTab(v)}>{l}</button>)}
       </div>
-      {tab === 'seances' ? <MuscuList templates={templates} onOpen={onOpen} onNew={onNew} /> : <MuscuJournal workouts={workouts} />}
+      {tab === 'seances' && <MuscuList templates={templates} onOpen={onOpen} onNew={onNew} />}
+      {tab === 'journal' && <MuscuJournal workouts={workouts} />}
+      {tab === 'exos' && <ExerciseLibrary workouts={workouts} templates={templates} onAddExercise={onAddExercise} />}
     </div>
   );
 }
@@ -2278,7 +2486,8 @@ function MuscuDetail({ template, startEdit, onUpdate, onDelete, onBack, onFinish
   const delSet = (exId, setId) => mapEx(exId, e => ({ ...e, sets: e.sets.filter(x => x.id !== setId) }));
   const rename = (exId, name) => mapEx(exId, e => ({ ...e, name }));
   const delEx = (exId) => upd(bl => bl.map(b => ({ ...b, exercises: b.exercises.filter(e => e.id !== exId) })).filter(b => b.exercises.length));
-  const addEx = () => upd(bl => [...bl, mkBlock(mkEx('Nouvel exercice', times(3, 10, 0)))]);
+  const [picker, setPicker] = useState(false);
+  const addEx = (name) => { upd(bl => [...bl, mkBlock(mkEx(name || 'Nouvel exercice', times(3, 10, 0), name === 'Traction' ? NOTE_PULLUP : ''))]); setPicker(false); };
 
   const renderEx = (e) => (
     <div className="ex" key={e.id}>
@@ -2327,7 +2536,7 @@ function MuscuDetail({ template, startEdit, onUpdate, onDelete, onBack, onFinish
 
       {edit && (
         <div>
-          <button className="btn ghost full" onClick={addEx}>+ Exercice</button>
+          <button className="btn ghost full" onClick={() => setPicker(true)}>+ Exercice</button>
           <div className="actions"><button className="btn warn" onClick={()=>{ if(confirm('Supprimer cette séance de musculation ?')) onDelete(); }}>Supprimer la séance</button></div>
         </div>
       )}
@@ -2336,6 +2545,12 @@ function MuscuDetail({ template, startEdit, onUpdate, onDelete, onBack, onFinish
       <div className="dock"><div className="dockin">
         <button className="btn full" onClick={onFinish}>Terminer la séance</button>
       </div></div>
+      {picker && (
+        <Sheet title="Choisir un exercice" onClose={() => setPicker(false)}>
+          <button className="btn ghost full" style={{ marginBottom: 14 }} onClick={() => addEx('')}>Créer un exercice libre</button>
+          <ExerciseLibrary workouts={[]} templates={[]} onPick={(e) => addEx(e.nom)} />
+        </Sheet>
+      )}
     </div>
   );
 }
@@ -2565,6 +2780,7 @@ function App(){
 
   const openMuscu = (templateId, from, edit) => { setMuscuView({ templateId, from: from || null, edit: !!edit }); setPage('muscu'); window.scrollTo(0, 0); };
   const updateTemplate = (t) => setTemplates(templates.map(x => x.id === t.id ? t : x));
+  const addExerciseToTemplate = (tid, ex) => setTemplates(ts => ts.map(t => t.id !== tid ? t : { ...t, blocks: [...t.blocks, mkBlock(mkEx(ex.nom, times(3, 10, 0), ex.nom === 'Traction' ? NOTE_PULLUP : ''))] }));
   const newTemplate = () => { const t = { id: uid(), name: 'Nouvelle séance', blocks: [] }; setTemplates([...templates, t]); openMuscu(t.id, null, true); };
   const deleteTemplate = (id) => {
     setTemplates(templates.filter(t => t.id !== id));
@@ -2708,7 +2924,7 @@ function App(){
             onAdd={(date)=>setSheet({ type:'session', wIdx:null, sid:null, date })}
             onMove={(wIdx, sid, iso)=>placeSession(wIdx, sid, iso)}
             onOpenMuscu={(id, from)=>openMuscu(id, from)} onSettings={openSettings} />}
-        {page==='muscu' && !muscuView && <MuscuHome templates={templates} workouts={workouts} onOpen={(id)=>openMuscu(id, null)} onNew={newTemplate} onSettings={openSettings} />}
+        {page==='muscu' && !muscuView && <MuscuHome templates={templates} workouts={workouts} onOpen={(id)=>openMuscu(id, null)} onNew={newTemplate} onSettings={openSettings} onAddExercise={addExerciseToTemplate} />}
         {page==='muscu' && muscuView && (() => {
           const t = templates.find(x => x.id === muscuView.templateId);
           if(!t) return null;
