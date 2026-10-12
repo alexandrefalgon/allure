@@ -8,6 +8,9 @@ Alexandre n'a aucune compétence en code : explique simplement, en français, et
 - **Source de vérité** : `src/app.jsx` (toute l'app) et `src/style.css`.
 - **Fichiers servis, générés** : `app.js` et `style.css` à la racine. Ne les modifie jamais à la main.
 - Après toute modification : `npm install` (la première fois) puis `npm run build`. Commite **les sources ET les fichiers générés**.
+- Si `npm install` est impossible (registre npm inaccessible depuis l'environnement), compilation de secours avec TypeScript, testée en octobre 2026 :
+  `tsc src/app.jsx --allowJs --jsx react --target es2020 --noCheck --removeComments --outDir /tmp/out && sed '1{/^"use strict";$/d}' /tmp/out/app.js > app.js && cp src/style.css style.css`
+  (on retire `"use strict"` pour rester identique au comportement de la sortie Babel). Le dire dans le message de commit.
 - `sw.js` : incrémente la constante `CACHE` (allure-vNN) à chaque livraison, sinon les téléphones gardent l'ancienne version.
 - `vendor/` : React et Leaflet embarqués (ne pas remplacer par des CDN).
 - `index.html`, `manifest.webmanifest` : rarement modifiés.
