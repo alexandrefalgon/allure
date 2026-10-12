@@ -2,7 +2,7 @@
 // Fichiers de l'app : réseau d'abord, en vérifiant auprès du serveur à chaque fois (cache: 'no-cache') pour que les mises à jour
 // arrivent tout de suite, sans attendre l'expiration du cache du navigateur ; cache de l'app en secours hors connexion.
 // Librairies (vendor/) et polices : cache d'abord.
-const CACHE = 'allure-v21';
+const CACHE = 'allure-v22';
 const CORE = [
   './', 'index.html', 'app.js', 'style.css', 'manifest.webmanifest',
   'vendor/react.production.min.js', 'vendor/react-dom.production.min.js', 'vendor/leaflet.js', 'vendor/leaflet.css',

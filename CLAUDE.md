@@ -17,6 +17,8 @@ Alexandre n'a aucune compétence en code : explique simplement, en français, et
 
 ## Test local
 - `npm run serve` puis ouvrir http://localhost:8765 (viewport mobile, environ 390 px de large).
+- Une nouvelle installation (localStorage vide) affiche l'introduction : cliquer « Passer l'introduction » dans les tests.
+- Avec Playwright, `page.route(...)` désactive le cache HTTP du navigateur : ne pas s'en servir pour tester les problèmes de cache.
 - Mode démo sans compte Intervals.icu : définir `window.ALLURE_DEMO = true` avant le chargement (activités, bien-être et tracés fictifs).
 - Pour tester dans un navigateur automatisé (Playwright) : simuler les API externes avec des routes interceptées plutôt que de dépendre du réseau.
 
@@ -28,7 +30,9 @@ Alexandre n'a aucune compétence en code : explique simplement, en français, et
 ## Architecture de `src/app.jsx`
 - Plan = `program` : tableau de semaines `{ id, sessions: [{ id, discipline, day(0=lundi), desc, target, templateId?, done }] }` ; la semaine 1 commence à `profile.programStart`. `locateWeek` crée/décale les semaines quand on déplace une séance.
 - `buildProgram(templates, zones)` génère le programme type de 12 semaines (3 blocs de 3 semaines + 1 semaine allégée). Semaine type : lun Push + footing facile · mar Pull · mer course qualité · jeu Jambes · ven repos · sam sortie longue vélo + Rappel haut du corps · dim natation.
-- Zones de FC : `profile.zones` (5 zones, ex. Z1 116–146 … Z5 191–205).
+- Zones de FC : `profile.zones` (5 zones) et `profile.maxHR`, **vides par défaut** (`DEFAULT_PROFILE`) : chaque utilisateur les renseigne dans Réglages. `zoneOk()` teste une zone ; sans zones, `buildProgram` écrit « Z1 » sans bpm et le coach reçoit « non renseignées ». Les données déjà enregistrées gardent leurs zones.
+- Introduction : `Onboarding`, affichée seulement à une nouvelle installation (`bootState` renvoie `fresh: true`) ou après « Tout effacer », ou à la demande (Réglages → Revoir l'introduction). Elle demande le prénom (`profile.firstName`, affiché « Bonjour Prénom » dans Aujourd'hui) puis explique comment obtenir les clés (Intervals.icu, OpenRouteService, Gemini). Les instructions et limites citées ont été vérifiées en octobre 2026 : à revérifier si elles changent.
+- Coach : bouton « Effacer » (barre au-dessus de la conversation) pour repartir de zéro ; la conversation est dans `allure_coach_v1` (40 derniers messages conservés).
 - Coach (`CoachPage`) : conversation avec l'API Gemini appelée directement depuis le navigateur (clé gratuite de l'utilisateur dans `allure_coach_key_v1`, jamais envoyée ailleurs). `buildCoachContext()` prépare le dossier de données (plan avec références [A1]…, séances réalisées, bien-être, charges) ; le modèle répond en JSON `{reply, actions}`. Les actions (`adjust`, `move`, `delete`) sont validées par `resolveActions()` puis appliquées seulement après clic de l'utilisateur via `coachApply()` dans `App`. Ne jamais appliquer une action automatiquement.
 - Base d'exercices (`EXO_RAW` → `EXERCISES`, composants `ExerciseLibrary` et `ExerciseInfoSheet`) : 118 exercices en français, textes originaux (ne pas copier de contenu protégé d'autres sites). Les noms suivent « Exercice – Matériel » comme les séances de l'utilisateur ; la colonne « Autres noms » rattache les variantes (G/D) au journal via `normEx`. Pour ajouter un exercice, ajouter une ligne à `EXO_RAW`.
 - L'Historique n'est plus un onglet : il s'ouvre depuis Réglages.

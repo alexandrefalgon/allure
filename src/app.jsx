@@ -45,10 +45,12 @@ function parseTargetMinutes(t){
 /* ---------- données ---------- */
 const uid = () => Math.random().toString(36).slice(2,10);
 
+// FC max et zones : vides au départ, chacun les renseigne (Réglages → Fréquence cardiaque) ; prénom saisi à l'introduction
 const DEFAULT_PROFILE = {
-  maxHR: 212, zones: [[116, 146], [147, 160], [161, 175], [176, 190], [191, 205]],
+  maxHR: '', zones: Array.from({ length: 5 }, () => ['', '']), firstName: '',
   programStart: fmt(new Date()),
 };
+const zoneOk = (z) => !!z && Number(z[0]) > 0 && Number(z[1]) > 0;
 
 /* ---------- programme type (12 semaines : 3 blocs de 3 semaines de charge + 1 semaine allégée) ----------
    Lun  Push + Course facile
@@ -90,8 +92,9 @@ const swimMin = (m) => Math.round(m * 0.027 / 5) * 5;
 
 function buildProgram(templates, zones){
   const Zn = zones && zones.length === 5 ? zones : DEFAULT_PROFILE.zones;
-  const z1 = (n) => 'Z' + n + ' (' + Zn[n - 1][0] + '–' + Zn[n - 1][1] + ' bpm)';
-  const zr = (a, b) => 'Z' + a + '-Z' + b + ' (' + Zn[a - 1][0] + '–' + Zn[b - 1][1] + ' bpm)';
+  // sans zones renseignées, on écrit seulement « Z1 », « Z2 »… sans fourchette de bpm
+  const z1 = (n) => 'Z' + n + (zoneOk(Zn[n - 1]) ? ' (' + Zn[n - 1][0] + '–' + Zn[n - 1][1] + ' bpm)' : '');
+  const zr = (a, b) => 'Z' + a + '-Z' + b + (zoneOk(Zn[a - 1]) && zoneOk(Zn[b - 1]) ? ' (' + Zn[a - 1][0] + '–' + Zn[b - 1][1] + ' bpm)' : '');
   const qZone = [z1(5), z1(4), zr(4, 5), z1(5), z1(4), zr(4, 5), z1(4), z1(4), zr(4, 5), z1(4), z1(5), ''];
   const tid = (name) => { const t = (templates || []).find(x => x.name === name); return t ? t.id : ''; };
   return Array.from({ length: 12 }, (_, i) => {
@@ -179,7 +182,7 @@ function bootState(){
   const init = loadState();
   if(!init){
     const templates = defaultTemplates();
-    return { workouts: [], templates, program: buildProgram(templates, DEFAULT_PROFILE.zones), profile: { ...DEFAULT_PROFILE, programStart: planStart() }, planVersion: PLAN_VERSION };
+    return { workouts: [], templates, program: buildProgram(templates, DEFAULT_PROFILE.zones), profile: { ...DEFAULT_PROFILE, programStart: planStart() }, planVersion: PLAN_VERSION, fresh: true };
   }
   if(init.planVersion === PLAN_VERSION) return init;
   if(init.planVersion === 3){
@@ -318,6 +321,7 @@ const PATHS = {
   next:    <path d="M9 5l7 7-7 7"/>,
   refresh: <path d="M20 11a8 8 0 1 0-2.4 5.7M20 4.5V11h-6.5"/>,
   close:   <path d="M6 6l12 12M18 6L6 18"/>,
+  restart: <path d="M4 4v6h6M4.6 14.5A8 8 0 1 0 6 6.3L4 10"/>,
 };
 function Icon({ name, size=22, sw=1.9 }){
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{PATHS[name]}</svg>;
@@ -1300,7 +1304,8 @@ function buildCoachContext({ program, profile, workouts, icu, icuConn, steps, te
   const today = parse(todayStr), base = startOfWeek(parse(profile.programStart));
   const L = [], refs = {};
   L.push('DONNÉES DE L\'UTILISATEUR (à la date du ' + longDate(today) + ')');
-  L.push('ZONES DE FC : ' + (profile.zones || []).map((r, i) => 'Z' + (i + 1) + ' ' + r[0] + '-' + r[1]).join(' | ') + (profile.maxHR ? ' | FC max ' + profile.maxHR : ''));
+  const zset = (profile.zones || []).map((r, i) => zoneOk(r) ? 'Z' + (i + 1) + ' ' + r[0] + '-' + r[1] : '').filter(Boolean);
+  L.push('ZONES DE FC : ' + (zset.length ? zset.join(' | ') : 'non renseignées par l\'utilisateur (n\'invente pas de zones)') + (profile.maxHR ? ' | FC max ' + profile.maxHR : ''));
   if(coach.goal && coach.goal.trim()) L.push('OBJECTIF : ' + coach.goal.trim());
   L.push('', 'PLAN (semaine précédente, en cours et suivante) :');
   const wNow = Math.floor(diffDays(startOfWeek(today), base) / 7);
@@ -1530,7 +1535,10 @@ function CoachPage({ program, profile, workouts, icu, icuConn, steps, templates,
   return (
     <div>
       <Header title="Coach" sub="Pose tes questions sur ton entraînement" onSettings={onSettings} />
-      <div className="coachtools"><button onClick={() => setCfg(true)}>Réglages du coach</button></div>
+      <div className="coachtools">
+        {coach.messages.length > 0 && <button className="reset" disabled={busy} aria-label="Effacer la conversation et repartir de zéro" title="Nouvelle conversation" onClick={() => { if(confirm('Repartir de zéro ? Les messages de cette conversation seront effacés (ton plan et tes séances ne changent pas).')){ setCoach(c => ({ ...c, messages: [] })); setErr(''); } }}><Icon name="restart" size={16} sw={2.2} /> Effacer</button>}
+        <button onClick={() => setCfg(true)}>Réglages du coach</button>
+      </div>
       <div className="chat" aria-live="polite">
         {coach.messages.length === 0 && (
           <div>
@@ -1755,7 +1763,8 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
     if(Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) goWeek(dx < 0 ? 1 : -1);
   };
 
-  let sub = longDate(today);
+  const name = (profile.firstName || '').trim();
+  const sub = name ? <><span className="hello">Bonjour {name}</span><br />{longDate(today)}</> : longDate(today);
 
   return (
     <div>
@@ -2664,15 +2673,93 @@ function FinishSheet({ title, date, onSave, onClose }){
   );
 }
 
+/* ---------- Introduction (premier lancement) ---------- */
+function Onboarding({ initialName, onDone }){
+  const [step, setStep] = useState(0);
+  const [name, setName] = useState(initialName || '');
+  const clean = name.trim().slice(0, 30);
+  const ext = (href, label) => <a href={href} target="_blank" rel="noopener noreferrer">{label}</a>;
+  const dots = <div className="intro-dots" aria-hidden="true">{[0, 1, 2].map(i => <i key={i} className={i === step ? 'on' : ''}></i>)}</div>;
+  return (
+    <div className="intro" role="dialog" aria-modal="true" aria-label="Introduction à Allure">
+      <div className="intro-in">
+        {dots}
+        {step === 0 && (
+          <div>
+            <h1>Bienvenue sur Allure</h1>
+            <p className="lead">Ton carnet de sport : course, vélo, natation et musculation. Tout reste sur ton téléphone, sans compte ni serveur.</p>
+            <label className="f" htmlFor="intro-name">Comment dois-je m'adresser à toi ?</label>
+            <input id="intro-name" className="big" autoComplete="given-name" autoCapitalize="words" maxLength={30} placeholder="Ton prénom" value={name} autoFocus
+                   onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if(e.key === 'Enter' && clean) setStep(1); }} />
+            <p className="note">Je m'en souviendrai et je te dirai bonjour dans l'onglet Aujourd'hui. Tu pourras le changer dans Réglages.</p>
+          </div>
+        )}
+        {step === 1 && (
+          <div>
+            <h1>Ta fréquence cardiaque</h1>
+            <p className="lead">Tes zones (Z1 à Z5) sont propres à toi, donc rien n'est prérempli.</p>
+            <ol className="intro-steps">
+              <li>Ouvre <b>Réglages</b> (l'icône en haut à droite d'Aujourd'hui), carte <b>Fréquence cardiaque</b>.</li>
+              <li>Renseigne ta FC max et tes 5 zones, puis appuie sur <b>Enregistrer</b>.</li>
+              <li>Dans la carte <b>Plan</b>, appuie sur <b>Recharger le programme type</b> : les bpm apparaissent dans tes séances.</li>
+            </ol>
+            <p className="note">Tant que les zones sont vides, le plan indique seulement Z1, Z2… et le coach n'invente aucune zone.</p>
+          </div>
+        )}
+        {step === 2 && (
+          <div>
+            <h1>Connecter tes services</h1>
+            <p className="lead">Facultatif : l'app fonctionne sans. Chaque clé est personnelle et reste sur ton téléphone.</p>
+            <div className="intro-card">
+              <h3>Intervals.icu <span>activités, sommeil, VFC</span></h3>
+              <ol>
+                <li>Ouvre {ext('https://intervals.icu', 'intervals.icu')} et connecte-toi à ton compte.</li>
+                <li>Va dans <b>Settings</b>, tout en bas : section <b>Developer Settings</b>. Génère ta clé API.</li>
+                <li>Colle-la dans Allure : <b>Réglages → Intervals.icu</b>.</li>
+              </ol>
+            </div>
+            <div className="intro-card">
+              <h3>OpenRouteService <span>itinéraires de course</span></h3>
+              <ol>
+                <li>Crée ton compte : {ext('https://openrouteservice.org/dev/#/signup', 'openrouteservice.org')}. Le compte est géré par HeiGIT, l'éditeur du service.</li>
+                <li>Récupère ta clé dans ton tableau de bord développeur (« developer dashboard »).</li>
+                <li>Colle-la dans Allure : onglet <b>Carte → Créer un itinéraire</b>.</li>
+              </ol>
+              <p className="note">Limite par défaut annoncée pour le calcul d'itinéraires : 2 000 requêtes par jour et 40 par minute. Une clé = une personne : ne partage pas la tienne.</p>
+            </div>
+            <div className="intro-card">
+              <h3>Gemini <span>le coach</span></h3>
+              <ol>
+                <li>Ouvre {ext('https://aistudio.google.com/apikey', 'Google AI Studio')}, connecte-toi avec ton compte Google et accepte les conditions.</li>
+                <li>Dans <b>API Keys</b>, crée une clé.</li>
+                <li>Colle-la dans Allure : onglet <b>Coach</b>.</li>
+              </ol>
+              <p className="note">En Europe (EEE), en Suisse et au Royaume-Uni, Google applique aux services gratuits les conditions de données des services payants : lis les conditions affichées à la création de ta clé.</p>
+            </div>
+            <p className="note">Tu pourras revoir cette introduction à tout moment dans Réglages.</p>
+          </div>
+        )}
+        <div className="intro-actions">
+          {step === 0 && <button className="btn" disabled={!clean} onClick={() => setStep(1)}>Continuer</button>}
+          {step === 1 && <button className="btn" onClick={() => setStep(2)}>Continuer</button>}
+          {step === 2 && <button className="btn" onClick={() => onDone(clean)}>Commencer</button>}
+          {step > 0 && <button className="btn ghost" onClick={() => setStep(step - 1)}>Retour</button>}
+          {step === 0 && <button className="link" onClick={() => onDone(clean)}>Passer l'introduction</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Réglages ---------- */
-function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
+function Settings({ profile, setProfile, onBack, onOpenIntro, onOpenHistory, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
   const [f, setF] = useState(profile);
   const [saved, setSaved] = useState(false);
   const [adjMsg, setAdjMsg] = useState('');
   const fileRef = useRef(null);
   const set = (k, v) => { setF(prev => ({...prev, [k]: v})); setSaved(false); };
   const num = (k) => ({ type:'number', inputMode:'numeric', value:f[k], onChange:(e)=>set(k, e.target.value) });
-  const zonesNum = () => f.zones.map(z => z.map(v => v === '' ? 0 : Number(v)));
+  const zonesNum = () => f.zones.map(z => z.map(v => v === '' ? '' : Number(v)));
   const setZone = (i, j, v) => { setF(prev => ({ ...prev, zones: prev.zones.map((z, k) => k !== i ? z : z.map((x, m) => m === j ? v : x)) })); setSaved(false); };
   const save = () => {
     setProfile({ ...f, maxHR: f.maxHR === '' ? '' : Number(f.maxHR), zones: zonesNum() });
@@ -2704,6 +2791,13 @@ function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadP
     <div>
       <button className="back" onClick={onBack}><Icon name="back" size={20} /> Retour</button>
       <Header title="Réglages" />
+
+      <div className="card">
+        <h3>Profil</h3>
+        <label className="f" htmlFor="r-name">Prénom (affiché dans Aujourd'hui)</label>
+        <input id="r-name" autoComplete="given-name" autoCapitalize="words" maxLength={30} value={f.firstName || ''} onChange={(e)=>set('firstName', e.target.value)} />
+        <div className="actions"><button className="btn ghost" onClick={onOpenIntro}>Revoir l'introduction</button></div>
+      </div>
 
       <IcuSettings conn={icuConn} icu={icu} onConnect={onConnectIcu} onDisconnect={onDisconnectIcu} onRefresh={onRefreshIcu} />
 
@@ -2739,14 +2833,15 @@ function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadP
 
       <div className="card">
         <h3>Fréquence cardiaque</h3>
+        <p className="note">À remplir toi-même : ces valeurs sont propres à chacun. Sans zones, le plan indique seulement Z1, Z2… Après l'avoir rempli, utilise « Recharger le programme type » (carte Plan) pour afficher les bpm dans les séances.</p>
         <label className="f" htmlFor="r-max">FC max</label>
         <input id="r-max" {...num('maxHR')} />
         {f.zones.map((z, i) => (
           <div key={i}>
             <label className="f">Zone {i + 1}</label>
             <div className="grid2">
-              <input type="number" inputMode="numeric" aria-label={'Zone ' + (i + 1) + ' : bas'} value={z[0]} onChange={(e)=>setZone(i, 0, e.target.value)} />
-              <input type="number" inputMode="numeric" aria-label={'Zone ' + (i + 1) + ' : haut'} value={z[1]} onChange={(e)=>setZone(i, 1, e.target.value)} />
+              <input type="number" inputMode="numeric" placeholder="bpm bas" aria-label={'Zone ' + (i + 1) + ' : bas'} value={z[0]} onChange={(e)=>setZone(i, 0, e.target.value)} />
+              <input type="number" inputMode="numeric" placeholder="bpm haut" aria-label={'Zone ' + (i + 1) + ' : haut'} value={z[1]} onChange={(e)=>setZone(i, 1, e.target.value)} />
             </div>
           </div>
         ))}
@@ -2798,6 +2893,8 @@ function App(){
   const [todayStr, setTodayStr] = useState(fmt(new Date()));
   const [sel, setSel] = useState(fmt(new Date()));
   const [sheet, setSheet] = useState(null);
+  const [intro, setIntro] = useState(!!init.fresh);
+  const finishIntro = (name) => { setProfile(p => ({ ...p, firstName: name || p.firstName || '' })); setIntro(false); window.scrollTo(0, 0); };
 
   useEffect(()=>{ saveState({ workouts, program, profile, templates, steps, planVersion: PLAN_VERSION }); }, [workouts, program, profile, templates, steps]);
   useEffect(()=>{ try{ navigator.storage && navigator.storage.persist && navigator.storage.persist(); }catch(e){} }, []);
@@ -2966,7 +3063,7 @@ function App(){
   const reset = () => {
     try{ localStorage.removeItem(KEY); }catch(e){}
     const tpls = defaultTemplates();
-    setSteps({}); setWorkouts([]); setProgram(buildProgram(tpls, DEFAULT_PROFILE.zones)); setProfile({ ...DEFAULT_PROFILE, programStart: planStart() }); setTemplates(tpls); setMuscuView(null); clearIcu(); setIcuConn(null); setIcu({ ...emptyIcu }); go('today');
+    setSteps({}); setWorkouts([]); setProgram(buildProgram(tpls, DEFAULT_PROFILE.zones)); setProfile({ ...DEFAULT_PROFILE, programStart: planStart() }); setTemplates(tpls); setMuscuView(null); clearIcu(); setIcuConn(null); setIcu({ ...emptyIcu }); go('today'); setIntro(true);
   };
   const importData = (d) => {
     const tpls = d.templates || defaultTemplates();
@@ -3019,7 +3116,7 @@ function App(){
         {page==='map' && <MapPage icu={icu} conn={icuConn} todayStr={todayStr} onSettings={openSettings} />}
         {page==='coach' && <CoachPage program={program} profile={profile} workouts={workouts} icu={icu} icuConn={icuConn} steps={steps} templates={templates} matches={matches} todayStr={todayStr} onApply={coachApply} onSettings={openSettings} />}
         {page==='history' && <History workouts={workouts} onDelete={deleteWorkout} onSettings={openSettings} onBack={()=>go('settings')} />}
-        {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onOpenHistory={()=>go('history')} onReset={reset} onLoadPlan={loadPlan} onShiftPlan={shiftPlan}
+        {page==='settings' && <Settings key={profile.firstName || ''} profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onOpenIntro={()=>setIntro(true)} onOpenHistory={()=>go('history')} onReset={reset} onLoadPlan={loadPlan} onShiftPlan={shiftPlan}
             getData={()=>({ workouts, program, profile, templates, steps })} onImport={importData}
             icuConn={icuConn} icu={icu} onConnectIcu={connectIcu} onDisconnectIcu={disconnectIcu} onRefreshIcu={()=>refreshIcu()} />}
       </main>
@@ -3056,6 +3153,7 @@ function App(){
         const initial = s ? { discipline:s.discipline, date: fmt(addDays(weekStartFor(sheet.wIdx), s.day)), desc:s.desc, target:s.target, templateId:s.templateId || '' } : { discipline:'course', date: sheet.date || todayStr, desc:'', target:'', templateId:'' };
         return <SessionSheet key={sheet.sid || 'new'} isNew={!s} initial={initial} templates={templates} result={s ? resultOf(workouts, s.id) : null} onOpenExercises={(tid)=>{ setSheet(null); openMuscu(tid, { wIdx: sheet.wIdx, sid: s.id }); }} onSave={(d)=>saveSession(sheet.wIdx, sheet.sid, d)} onDelete={()=>deleteSession(sheet.wIdx, sheet.sid)} onClose={()=>setSheet(null)} />;
       })()}
+      {intro && <Onboarding initialName={profile.firstName} onDone={finishIntro} />}
     </div>
   );
 }

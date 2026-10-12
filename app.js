@@ -42,9 +42,10 @@ function parseTargetMinutes(t) {
 }
 const uid = () => Math.random().toString(36).slice(2, 10);
 const DEFAULT_PROFILE = {
-    maxHR: 212, zones: [[116, 146], [147, 160], [161, 175], [176, 190], [191, 205]],
+    maxHR: '', zones: Array.from({ length: 5 }, () => ['', '']), firstName: '',
     programStart: fmt(new Date()),
 };
+const zoneOk = (z) => !!z && Number(z[0]) > 0 && Number(z[1]) > 0;
 const PACE_RE = /(\d+)'(\d{2})\/(km|100 m)/g;
 const hasPace = (t) => /(\d+)'(\d{2})\/(km|100 m)/.test(t || '');
 const shiftPaces = (text, n) => String(text || '').replace(PACE_RE, (m, mi, se, u) => { const t = Math.max(60, Number(mi) * 60 + Number(se) + n); return Math.floor(t / 60) + "'" + pad(t % 60) + '/' + u; });
@@ -79,8 +80,8 @@ const P_SWIM_M = [1700, 1900, 2000, 1400, 2100, 2200, 2300, 1700, 2400, 2500, 26
 const swimMin = (m) => Math.round(m * 0.027 / 5) * 5;
 function buildProgram(templates, zones) {
     const Zn = zones && zones.length === 5 ? zones : DEFAULT_PROFILE.zones;
-    const z1 = (n) => 'Z' + n + ' (' + Zn[n - 1][0] + '–' + Zn[n - 1][1] + ' bpm)';
-    const zr = (a, b) => 'Z' + a + '-Z' + b + ' (' + Zn[a - 1][0] + '–' + Zn[b - 1][1] + ' bpm)';
+    const z1 = (n) => 'Z' + n + (zoneOk(Zn[n - 1]) ? ' (' + Zn[n - 1][0] + '–' + Zn[n - 1][1] + ' bpm)' : '');
+    const zr = (a, b) => 'Z' + a + '-Z' + b + (zoneOk(Zn[a - 1]) && zoneOk(Zn[b - 1]) ? ' (' + Zn[a - 1][0] + '–' + Zn[b - 1][1] + ' bpm)' : '');
     const qZone = [z1(5), z1(4), zr(4, 5), z1(5), z1(4), zr(4, 5), z1(4), z1(4), zr(4, 5), z1(4), z1(5), ''];
     const tid = (name) => { const t = (templates || []).find(x => x.name === name); return t ? t.id : ''; };
     return Array.from({ length: 12 }, (_, i) => {
@@ -163,7 +164,7 @@ function bootState() {
     const init = loadState();
     if (!init) {
         const templates = defaultTemplates();
-        return { workouts: [], templates, program: buildProgram(templates, DEFAULT_PROFILE.zones), profile: { ...DEFAULT_PROFILE, programStart: planStart() }, planVersion: PLAN_VERSION };
+        return { workouts: [], templates, program: buildProgram(templates, DEFAULT_PROFILE.zones), profile: { ...DEFAULT_PROFILE, programStart: planStart() }, planVersion: PLAN_VERSION, fresh: true };
     }
     if (init.planVersion === PLAN_VERSION)
         return init;
@@ -359,6 +360,7 @@ const PATHS = {
     next: React.createElement("path", { d: "M9 5l7 7-7 7" }),
     refresh: React.createElement("path", { d: "M20 11a8 8 0 1 0-2.4 5.7M20 4.5V11h-6.5" }),
     close: React.createElement("path", { d: "M6 6l12 12M18 6L6 18" }),
+    restart: React.createElement("path", { d: "M4 4v6h6M4.6 14.5A8 8 0 1 0 6 6.3L4 10" }),
 };
 function Icon({ name, size = 22, sw = 1.9 }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: sw, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": "true" }, PATHS[name]);
@@ -1501,7 +1503,8 @@ function buildCoachContext({ program, profile, workouts, icu, icuConn, steps, te
     const today = parse(todayStr), base = startOfWeek(parse(profile.programStart));
     const L = [], refs = {};
     L.push('DONNÉES DE L\'UTILISATEUR (à la date du ' + longDate(today) + ')');
-    L.push('ZONES DE FC : ' + (profile.zones || []).map((r, i) => 'Z' + (i + 1) + ' ' + r[0] + '-' + r[1]).join(' | ') + (profile.maxHR ? ' | FC max ' + profile.maxHR : ''));
+    const zset = (profile.zones || []).map((r, i) => zoneOk(r) ? 'Z' + (i + 1) + ' ' + r[0] + '-' + r[1] : '').filter(Boolean);
+    L.push('ZONES DE FC : ' + (zset.length ? zset.join(' | ') : 'non renseignées par l\'utilisateur (n\'invente pas de zones)') + (profile.maxHR ? ' | FC max ' + profile.maxHR : ''));
     if (coach.goal && coach.goal.trim())
         L.push('OBJECTIF : ' + coach.goal.trim());
     L.push('', 'PLAN (semaine précédente, en cours et suivante) :');
@@ -1824,6 +1827,12 @@ function CoachPage({ program, profile, workouts, icu, icuConn, steps, templates,
     return (React.createElement("div", null,
         React.createElement(Header, { title: "Coach", sub: "Pose tes questions sur ton entra\u00EEnement", onSettings: onSettings }),
         React.createElement("div", { className: "coachtools" },
+            coach.messages.length > 0 && React.createElement("button", { className: "reset", disabled: busy, "aria-label": "Effacer la conversation et repartir de z\u00E9ro", title: "Nouvelle conversation", onClick: () => { if (confirm('Repartir de zéro ? Les messages de cette conversation seront effacés (ton plan et tes séances ne changent pas).')) {
+                    setCoach(c => ({ ...c, messages: [] }));
+                    setErr('');
+                } } },
+                React.createElement(Icon, { name: "restart", size: 16, sw: 2.2 }),
+                " Effacer"),
             React.createElement("button", { onClick: () => setCfg(true) }, "R\u00E9glages du coach")),
         React.createElement("div", { className: "chat", "aria-live": "polite" },
             coach.messages.length === 0 && (React.createElement("div", null,
@@ -2027,7 +2036,13 @@ function Today({ workouts, program, profile, todayStr, sel, setSel, templates, o
         if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5)
             goWeek(dx < 0 ? 1 : -1);
     };
-    let sub = longDate(today);
+    const name = (profile.firstName || '').trim();
+    const sub = name ? React.createElement(React.Fragment, null,
+        React.createElement("span", { className: "hello" },
+            "Bonjour ",
+            name),
+        React.createElement("br", null),
+        longDate(today)) : longDate(today);
     return (React.createElement("div", null,
         React.createElement(Header, { title: "Aujourd'hui", sub: sub, onSettings: onSettings }),
         React.createElement(IcuBlock, { conn: icuConn, icu: icu, onRefresh: onRefreshIcu, onConnect: onSettings, weekFrom: fmt(weekStart), weekTo: fmt(addDays(weekStart, 6)) }),
@@ -2969,14 +2984,114 @@ function FinishSheet({ title, date, onSave, onClose }) {
         React.createElement("div", { className: "actions" },
             React.createElement("button", { className: "btn", onClick: save }, "Enregistrer la s\u00E9ance"))));
 }
-function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }) {
+function Onboarding({ initialName, onDone }) {
+    const [step, setStep] = useState(0);
+    const [name, setName] = useState(initialName || '');
+    const clean = name.trim().slice(0, 30);
+    const ext = (href, label) => React.createElement("a", { href: href, target: "_blank", rel: "noopener noreferrer" }, label);
+    const dots = React.createElement("div", { className: "intro-dots", "aria-hidden": "true" }, [0, 1, 2].map(i => React.createElement("i", { key: i, className: i === step ? 'on' : '' })));
+    return (React.createElement("div", { className: "intro", role: "dialog", "aria-modal": "true", "aria-label": "Introduction \u00E0 Allure" },
+        React.createElement("div", { className: "intro-in" },
+            dots,
+            step === 0 && (React.createElement("div", null,
+                React.createElement("h1", null, "Bienvenue sur Allure"),
+                React.createElement("p", { className: "lead" }, "Ton carnet de sport : course, v\u00E9lo, natation et musculation. Tout reste sur ton t\u00E9l\u00E9phone, sans compte ni serveur."),
+                React.createElement("label", { className: "f", htmlFor: "intro-name" }, "Comment dois-je m'adresser \u00E0 toi ?"),
+                React.createElement("input", { id: "intro-name", className: "big", autoComplete: "given-name", autoCapitalize: "words", maxLength: 30, placeholder: "Ton pr\u00E9nom", value: name, autoFocus: true, onChange: (e) => setName(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter' && clean)
+                        setStep(1); } }),
+                React.createElement("p", { className: "note" }, "Je m'en souviendrai et je te dirai bonjour dans l'onglet Aujourd'hui. Tu pourras le changer dans R\u00E9glages."))),
+            step === 1 && (React.createElement("div", null,
+                React.createElement("h1", null, "Ta fr\u00E9quence cardiaque"),
+                React.createElement("p", { className: "lead" }, "Tes zones (Z1 \u00E0 Z5) sont propres \u00E0 toi, donc rien n'est pr\u00E9rempli."),
+                React.createElement("ol", { className: "intro-steps" },
+                    React.createElement("li", null,
+                        "Ouvre ",
+                        React.createElement("b", null, "R\u00E9glages"),
+                        " (l'ic\u00F4ne en haut \u00E0 droite d'Aujourd'hui), carte ",
+                        React.createElement("b", null, "Fr\u00E9quence cardiaque"),
+                        "."),
+                    React.createElement("li", null,
+                        "Renseigne ta FC max et tes 5 zones, puis appuie sur ",
+                        React.createElement("b", null, "Enregistrer"),
+                        "."),
+                    React.createElement("li", null,
+                        "Dans la carte ",
+                        React.createElement("b", null, "Plan"),
+                        ", appuie sur ",
+                        React.createElement("b", null, "Recharger le programme type"),
+                        " : les bpm apparaissent dans tes s\u00E9ances.")),
+                React.createElement("p", { className: "note" }, "Tant que les zones sont vides, le plan indique seulement Z1, Z2\u2026 et le coach n'invente aucune zone."))),
+            step === 2 && (React.createElement("div", null,
+                React.createElement("h1", null, "Connecter tes services"),
+                React.createElement("p", { className: "lead" }, "Facultatif : l'app fonctionne sans. Chaque cl\u00E9 est personnelle et reste sur ton t\u00E9l\u00E9phone."),
+                React.createElement("div", { className: "intro-card" },
+                    React.createElement("h3", null,
+                        "Intervals.icu ",
+                        React.createElement("span", null, "activit\u00E9s, sommeil, VFC")),
+                    React.createElement("ol", null,
+                        React.createElement("li", null,
+                            "Ouvre ",
+                            ext('https://intervals.icu', 'intervals.icu'),
+                            " et connecte-toi \u00E0 ton compte."),
+                        React.createElement("li", null,
+                            "Va dans ",
+                            React.createElement("b", null, "Settings"),
+                            ", tout en bas : section ",
+                            React.createElement("b", null, "Developer Settings"),
+                            ". G\u00E9n\u00E8re ta cl\u00E9 API."),
+                        React.createElement("li", null,
+                            "Colle-la dans Allure : ",
+                            React.createElement("b", null, "R\u00E9glages \u2192 Intervals.icu"),
+                            "."))),
+                React.createElement("div", { className: "intro-card" },
+                    React.createElement("h3", null,
+                        "OpenRouteService ",
+                        React.createElement("span", null, "itin\u00E9raires de course")),
+                    React.createElement("ol", null,
+                        React.createElement("li", null,
+                            "Cr\u00E9e ton compte : ",
+                            ext('https://openrouteservice.org/dev/#/signup', 'openrouteservice.org'),
+                            ". Le compte est g\u00E9r\u00E9 par HeiGIT, l'\u00E9diteur du service."),
+                        React.createElement("li", null, "R\u00E9cup\u00E8re ta cl\u00E9 dans ton tableau de bord d\u00E9veloppeur (\u00AB developer dashboard \u00BB)."),
+                        React.createElement("li", null,
+                            "Colle-la dans Allure : onglet ",
+                            React.createElement("b", null, "Carte \u2192 Cr\u00E9er un itin\u00E9raire"),
+                            ".")),
+                    React.createElement("p", { className: "note" }, "Limite par d\u00E9faut annonc\u00E9e pour le calcul d'itin\u00E9raires : 2 000 requ\u00EAtes par jour et 40 par minute. Une cl\u00E9 = une personne : ne partage pas la tienne.")),
+                React.createElement("div", { className: "intro-card" },
+                    React.createElement("h3", null,
+                        "Gemini ",
+                        React.createElement("span", null, "le coach")),
+                    React.createElement("ol", null,
+                        React.createElement("li", null,
+                            "Ouvre ",
+                            ext('https://aistudio.google.com/apikey', 'Google AI Studio'),
+                            ", connecte-toi avec ton compte Google et accepte les conditions."),
+                        React.createElement("li", null,
+                            "Dans ",
+                            React.createElement("b", null, "API Keys"),
+                            ", cr\u00E9e une cl\u00E9."),
+                        React.createElement("li", null,
+                            "Colle-la dans Allure : onglet ",
+                            React.createElement("b", null, "Coach"),
+                            ".")),
+                    React.createElement("p", { className: "note" }, "En Europe (EEE), en Suisse et au Royaume-Uni, Google applique aux services gratuits les conditions de donn\u00E9es des services payants : lis les conditions affich\u00E9es \u00E0 la cr\u00E9ation de ta cl\u00E9.")),
+                React.createElement("p", { className: "note" }, "Tu pourras revoir cette introduction \u00E0 tout moment dans R\u00E9glages."))),
+            React.createElement("div", { className: "intro-actions" },
+                step === 0 && React.createElement("button", { className: "btn", disabled: !clean, onClick: () => setStep(1) }, "Continuer"),
+                step === 1 && React.createElement("button", { className: "btn", onClick: () => setStep(2) }, "Continuer"),
+                step === 2 && React.createElement("button", { className: "btn", onClick: () => onDone(clean) }, "Commencer"),
+                step > 0 && React.createElement("button", { className: "btn ghost", onClick: () => setStep(step - 1) }, "Retour"),
+                step === 0 && React.createElement("button", { className: "link", onClick: () => onDone(clean) }, "Passer l'introduction")))));
+}
+function Settings({ profile, setProfile, onBack, onOpenIntro, onOpenHistory, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }) {
     const [f, setF] = useState(profile);
     const [saved, setSaved] = useState(false);
     const [adjMsg, setAdjMsg] = useState('');
     const fileRef = useRef(null);
     const set = (k, v) => { setF(prev => ({ ...prev, [k]: v })); setSaved(false); };
     const num = (k) => ({ type: 'number', inputMode: 'numeric', value: f[k], onChange: (e) => set(k, e.target.value) });
-    const zonesNum = () => f.zones.map(z => z.map(v => v === '' ? 0 : Number(v)));
+    const zonesNum = () => f.zones.map(z => z.map(v => v === '' ? '' : Number(v)));
     const setZone = (i, j, v) => { setF(prev => ({ ...prev, zones: prev.zones.map((z, k) => k !== i ? z : z.map((x, m) => m === j ? v : x)) })); setSaved(false); };
     const save = () => {
         setProfile({ ...f, maxHR: f.maxHR === '' ? '' : Number(f.maxHR), zones: zonesNum() });
@@ -3020,6 +3135,12 @@ function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadP
             React.createElement(Icon, { name: "back", size: 20 }),
             " Retour"),
         React.createElement(Header, { title: "R\u00E9glages" }),
+        React.createElement("div", { className: "card" },
+            React.createElement("h3", null, "Profil"),
+            React.createElement("label", { className: "f", htmlFor: "r-name" }, "Pr\u00E9nom (affich\u00E9 dans Aujourd'hui)"),
+            React.createElement("input", { id: "r-name", autoComplete: "given-name", autoCapitalize: "words", maxLength: 30, value: f.firstName || '', onChange: (e) => set('firstName', e.target.value) }),
+            React.createElement("div", { className: "actions" },
+                React.createElement("button", { className: "btn ghost", onClick: onOpenIntro }, "Revoir l'introduction"))),
         React.createElement(IcuSettings, { conn: icuConn, icu: icu, onConnect: onConnectIcu, onDisconnect: onDisconnectIcu, onRefresh: onRefreshIcu }),
         React.createElement("div", { className: "card" },
             React.createElement("h3", null, "Historique des s\u00E9ances"),
@@ -3055,6 +3176,7 @@ function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadP
             adjMsg && React.createElement("p", { className: "note", role: "status", style: { marginTop: 12 } }, adjMsg)),
         React.createElement("div", { className: "card" },
             React.createElement("h3", null, "Fr\u00E9quence cardiaque"),
+            React.createElement("p", { className: "note" }, "\u00C0 remplir toi-m\u00EAme : ces valeurs sont propres \u00E0 chacun. Sans zones, le plan indique seulement Z1, Z2\u2026 Apr\u00E8s l'avoir rempli, utilise \u00AB Recharger le programme type \u00BB (carte Plan) pour afficher les bpm dans les s\u00E9ances."),
             React.createElement("label", { className: "f", htmlFor: "r-max" }, "FC max"),
             React.createElement("input", { id: "r-max", ...num('maxHR') }),
             f.zones.map((z, i) => (React.createElement("div", { key: i },
@@ -3062,8 +3184,8 @@ function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadP
                     "Zone ",
                     i + 1),
                 React.createElement("div", { className: "grid2" },
-                    React.createElement("input", { type: "number", inputMode: "numeric", "aria-label": 'Zone ' + (i + 1) + ' : bas', value: z[0], onChange: (e) => setZone(i, 0, e.target.value) }),
-                    React.createElement("input", { type: "number", inputMode: "numeric", "aria-label": 'Zone ' + (i + 1) + ' : haut', value: z[1], onChange: (e) => setZone(i, 1, e.target.value) })))))),
+                    React.createElement("input", { type: "number", inputMode: "numeric", placeholder: "bpm bas", "aria-label": 'Zone ' + (i + 1) + ' : bas', value: z[0], onChange: (e) => setZone(i, 0, e.target.value) }),
+                    React.createElement("input", { type: "number", inputMode: "numeric", placeholder: "bpm haut", "aria-label": 'Zone ' + (i + 1) + ' : haut', value: z[1], onChange: (e) => setZone(i, 1, e.target.value) })))))),
         React.createElement("div", { className: "actions", style: { marginTop: 18 } },
             React.createElement("button", { className: "btn", onClick: save }, saved ? 'Enregistré ✓' : 'Enregistrer')),
         React.createElement("div", { className: "card" },
@@ -3104,6 +3226,8 @@ function App() {
     const [todayStr, setTodayStr] = useState(fmt(new Date()));
     const [sel, setSel] = useState(fmt(new Date()));
     const [sheet, setSheet] = useState(null);
+    const [intro, setIntro] = useState(!!init.fresh);
+    const finishIntro = (name) => { setProfile(p => ({ ...p, firstName: name || p.firstName || '' })); setIntro(false); window.scrollTo(0, 0); };
     useEffect(() => { saveState({ workouts, program, profile, templates, steps, planVersion: PLAN_VERSION }); }, [workouts, program, profile, templates, steps]);
     useEffect(() => { try {
         navigator.storage && navigator.storage.persist && navigator.storage.persist();
@@ -3309,6 +3433,7 @@ function App() {
         setIcuConn(null);
         setIcu({ ...emptyIcu });
         go('today');
+        setIntro(true);
     };
     const importData = (d) => {
         const tpls = d.templates || defaultTemplates();
@@ -3369,7 +3494,7 @@ function App() {
             page === 'map' && React.createElement(MapPage, { icu: icu, conn: icuConn, todayStr: todayStr, onSettings: openSettings }),
             page === 'coach' && React.createElement(CoachPage, { program: program, profile: profile, workouts: workouts, icu: icu, icuConn: icuConn, steps: steps, templates: templates, matches: matches, todayStr: todayStr, onApply: coachApply, onSettings: openSettings }),
             page === 'history' && React.createElement(History, { workouts: workouts, onDelete: deleteWorkout, onSettings: openSettings, onBack: () => go('settings') }),
-            page === 'settings' && React.createElement(Settings, { profile: profile, setProfile: setProfile, onBack: () => go(prevPage), onOpenHistory: () => go('history'), onReset: reset, onLoadPlan: loadPlan, onShiftPlan: shiftPlan, getData: () => ({ workouts, program, profile, templates, steps }), onImport: importData, icuConn: icuConn, icu: icu, onConnectIcu: connectIcu, onDisconnectIcu: disconnectIcu, onRefreshIcu: () => refreshIcu() })),
+            page === 'settings' && React.createElement(Settings, { key: profile.firstName || '', profile: profile, setProfile: setProfile, onBack: () => go(prevPage), onOpenIntro: () => setIntro(true), onOpenHistory: () => go('history'), onReset: reset, onLoadPlan: loadPlan, onShiftPlan: shiftPlan, getData: () => ({ workouts, program, profile, templates, steps }), onImport: importData, icuConn: icuConn, icu: icu, onConnectIcu: connectIcu, onDisconnectIcu: disconnectIcu, onRefreshIcu: () => refreshIcu() })),
         !onSettingsPage && (page === 'today' || page === 'history') && (React.createElement("div", { className: "fabwrap" },
             React.createElement("div", { className: "fabin" },
                 React.createElement("button", { className: "fab", onClick: () => setSheet({ type: 'log' }) },
@@ -3396,6 +3521,7 @@ function App() {
             const s = sheet.sid ? program[sheet.wIdx].sessions.find(x => x.id === sheet.sid) : null;
             const initial = s ? { discipline: s.discipline, date: fmt(addDays(weekStartFor(sheet.wIdx), s.day)), desc: s.desc, target: s.target, templateId: s.templateId || '' } : { discipline: 'course', date: sheet.date || todayStr, desc: '', target: '', templateId: '' };
             return React.createElement(SessionSheet, { key: sheet.sid || 'new', isNew: !s, initial: initial, templates: templates, result: s ? resultOf(workouts, s.id) : null, onOpenExercises: (tid) => { setSheet(null); openMuscu(tid, { wIdx: sheet.wIdx, sid: s.id }); }, onSave: (d) => saveSession(sheet.wIdx, sheet.sid, d), onDelete: () => deleteSession(sheet.wIdx, sheet.sid), onClose: () => setSheet(null) });
-        })()));
+        })(),
+        intro && React.createElement(Onboarding, { initialName: profile.firstName, onDone: finishIntro })));
 }
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App, null));

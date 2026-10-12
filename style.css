@@ -399,3 +399,34 @@ select{width:100%;}
 .exlist{list-style:none;margin:6px 0 0;padding:0;}
 .exlist li{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;}
 .exlist li span{color:var(--ink2);text-align:right;}
+
+/* bouton « nouvelle conversation » du coach */
+.coachtools{justify-content:space-between;align-items:center;gap:10px;}
+.coachtools button.reset{display:inline-flex;align-items:center;gap:6px;color:var(--ink2);border-color:transparent;background:transparent;padding:0 10px 0 6px;}
+.coachtools button.reset:active{background:var(--line);}
+.coachtools button.reset:disabled{opacity:.45;cursor:default;}
+
+/* salutation dans Aujourd'hui */
+.sub .hello{color:var(--ink);font-weight:700;}
+
+/* introduction du premier lancement */
+.intro{position:fixed;inset:0;z-index:200;background:var(--paper);overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.intro-in{max-width:520px;margin:0 auto;padding:calc(26px + var(--top)) 22px calc(36px + var(--bot));}
+.intro-dots{display:flex;gap:8px;margin-bottom:26px;}
+.intro-dots i{width:26px;height:5px;border-radius:3px;background:var(--line);}
+.intro-dots i.on{background:var(--ink);}
+.intro h1{margin-bottom:12px;}
+.intro .lead{font-size:17px;line-height:1.4;color:var(--ink2);}
+.intro .note{color:var(--ink2);font-size:14.5px;margin-top:10px;}
+.intro input.big{width:100%;}
+.intro-steps{margin:18px 0 0;padding-left:22px;display:grid;gap:10px;}
+.intro-steps li{padding-left:2px;}
+.intro-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:4px 16px 16px;margin-top:14px;}
+.intro-card h3{font:700 24px/1 var(--head);margin-top:14px;}
+.intro-card h3 span{display:block;font:400 14px/1.3 var(--body);color:var(--ink2);margin-top:4px;}
+.intro-card ol{margin:10px 0 0;padding-left:20px;display:grid;gap:6px;font-size:15px;}
+.intro-card a,.intro a{color:var(--ink);font-weight:600;text-underline-offset:3px;}
+.intro-actions{display:flex;flex-direction:column;align-items:stretch;gap:10px;margin-top:26px;}
+.intro-actions .link{align-self:center;}
+.coachtools button{white-space:nowrap;}
+.coachtools button.reset{font-size:14px;}
