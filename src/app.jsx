@@ -305,6 +305,8 @@ const PATHS = {
   settings:<><path d="M4 8h9M19 8h1M4 16h1M11 16h9"/><circle cx="16" cy="8" r="2.2"/><circle cx="8" cy="16" r="2.2"/></>,
   muscu:   <path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>,
   plus:    <path d="M12 5v14M5 12h14"/>,
+  coach:   <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/>,
+  send:    <path d="M4 12l16-8-6 16-2.5-6.5z M11.5 13.5L20 4"/>,
   map:     <><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></>,
   check:   <path d="M5 12.5l4.5 4.5L19 7.5"/>,
   chevron: <path d="M6 9l6 6 6-6"/>,
@@ -1268,6 +1270,302 @@ function MapPage({ icu, conn, todayStr, onSettings }){
   );
 }
 
+/* ---------- Coach (Gemini, clé gratuite) ---------- */
+const COACH_KEY = 'allure_coach_key_v1', COACH_STORE = 'allure_coach_v1';
+const COACH_DEFAULTS = { model: 'gemini-2.5-flash', goal: '', inc: { sleep: true, hrv: true, steps: true, muscu: true }, messages: [] };
+const loadCoach = () => {
+  try{
+    const c = JSON.parse(lsGet(COACH_STORE)) || {};
+    return { ...COACH_DEFAULTS, ...c, inc: { ...COACH_DEFAULTS.inc, ...(c.inc || {}) }, messages: Array.isArray(c.messages) ? c.messages : [] };
+  }catch(e){ return { ...COACH_DEFAULTS, inc: { ...COACH_DEFAULTS.inc }, messages: [] }; }
+};
+const saveCoach = (c) => lsSet(COACH_STORE, JSON.stringify({ ...c, messages: c.messages.slice(-40) }));
+const dFr = (d) => DAYS_ABBR[(d.getDay() + 6) % 7].toLowerCase() + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
+
+const COACH_SYSTEM = `Tu es le coach d'entraînement intégré à l'application Allure (course à pied, vélo, natation, musculation). Tu parles à son utilisateur, en français, en le tutoyant.
+Règles :
+- Réponds de façon concrète et concise (150 mots maximum, sauf demande de détail). Tu peux utiliser **gras** et des listes avec « - ».
+- Appuie-toi UNIQUEMENT sur les données fournies ci-dessous. Si une donnée manque, dis-le. N'invente jamais de chiffre, d'allure ou de date.
+- Sois prudent sur la santé : pas de diagnostic ni de conseil médical. En cas de douleur, de malaise ou de symptôme inquiétant, recommande de consulter un professionnel de santé.
+- Utilise les zones de fréquence cardiaque de l'utilisateur, pas des formules génériques.
+- Tu peux proposer de modifier le programme dans le champ « actions » (3 maximum), uniquement si l'utilisateur le demande ou si c'est clairement justifié par ses données. Utilise exclusivement les références [A1], [A2]… du plan (séances à venir). Types : « adjust » (durMin = nouvelle durée totale en minutes ; paceDeltaSec = écart d'allure en secondes par km ou par 100 m, négatif = plus rapide), « move » (newDate au format AAAA-MM-JJ, à partir d'aujourd'hui), « delete ». Chaque action a un « why » d'une phrase. Sans proposition, laisse « actions » vide.
+- L'utilisateur validera lui-même chaque action : décris-les aussi dans « reply ».
+Réponds toujours en JSON : {"reply": "...", "actions": [...]}.`;
+
+function buildCoachContext({ program, profile, workouts, icu, icuConn, steps, templates, matches, todayStr, coach }){
+  const today = parse(todayStr), base = startOfWeek(parse(profile.programStart));
+  const L = [], refs = {};
+  L.push('DONNÉES DE L\'UTILISATEUR (à la date du ' + longDate(today) + ')');
+  L.push('ZONES DE FC : ' + (profile.zones || []).map((r, i) => 'Z' + (i + 1) + ' ' + r[0] + '-' + r[1]).join(' | ') + (profile.maxHR ? ' | FC max ' + profile.maxHR : ''));
+  if(coach.goal && coach.goal.trim()) L.push('OBJECTIF : ' + coach.goal.trim());
+  L.push('', 'PLAN (semaine précédente, en cours et suivante) :');
+  const wNow = Math.floor(diffDays(startOfWeek(today), base) / 7);
+  let n = 0, any = false;
+  for(let wi = wNow - 1; wi <= wNow + 1; wi++){
+    if(wi < 0 || wi >= program.length) continue;
+    any = true;
+    const ws = addDays(base, wi * 7);
+    L.push('Semaine ' + (wi + 1) + ' (du ' + dFr(ws) + ' au ' + dFr(addDays(ws, 6)) + ')');
+    [...program[wi].sessions].sort((a, b) => a.day - b.day).forEach(x => {
+      const d = addDays(ws, x.day), iso = fmt(d), act = matches[x.id];
+      const name = (x.templateId && (templates.find(t => t.id === x.templateId) || {}).name) || (DISC[x.discipline] || DISC.autre).short;
+      let status;
+      if(act) status = 'FAIT, activité réelle : ' + actSummary(act);
+      else if(x.done) status = 'FAIT';
+      else if(iso < todayStr) status = 'NON FAITE';
+      else if(iso === todayStr) status = "AUJOURD'HUI, à faire";
+      else status = 'à venir';
+      let ref = '';
+      if(!act && !x.done && iso >= todayStr){ n++; ref = '[A' + n + '] '; refs['A' + n] = { sid: x.id }; }
+      L.push('- ' + ref + dFr(d) + ' · ' + name + ' · ' + x.desc + (x.target ? ' · ' + x.target : '') + ' → ' + status);
+    });
+  }
+  if(!any) L.push('(aucun plan sur cette période)');
+
+  const from14 = fmt(addDays(today, -14)), done = [];
+  if(icuConn) (icu.activities || []).filter(a => a.date >= from14 && a.date <= todayStr).forEach(a => done.push({ d: a.date + (a.time || ''), t: dFr(parse(a.date)) + ' · ' + (DISC[a.kind] || DISC.autre).short + ' · ' + actSummary(a) + ' (Intervals.icu)' }));
+  workouts.filter(w => w.date >= from14 && w.date <= todayStr).forEach(w => done.push({ d: w.date + '99', t: dFr(parse(w.date)) + ' · ' + (DISC[w.discipline] || DISC.course).short + (w.title ? ' « ' + w.title + ' »' : '') + ' · ' + fmtMin(w.duration) + (w.distance ? ' · ' + w.distance + ' km' : '') + (w.avgHR ? ' · FC moy ' + w.avgHR : '') + (w.maxHR ? ' · FC max ' + w.maxHR : '') + (w.strain ? ' · strain Whoop ' + w.strain : '') + (w.rpe ? ' · effort ' + w.rpe + '/10' : '') }));
+  L.push('', 'SÉANCES RÉALISÉES (14 derniers jours) :');
+  if(done.length) done.sort((a, b) => a.d.localeCompare(b.d)).forEach(x => L.push('- ' + x.t)); else L.push('(aucune)');
+
+  const inc = coach.inc, byDate = {};
+  (icu.wellness || []).forEach(x => { byDate[x.date] = x; });
+  const sm = inc.steps ? stepsMap(icu, steps) : {}, wl = [];
+  for(let i = 13; i >= 0; i--){
+    const d = addDays(today, -i), iso = fmt(d), x = byDate[iso] || {}, p = [];
+    if(inc.sleep && x.sleep) p.push('sommeil ' + fmtMin(Math.round(x.sleep / 60)));
+    if(inc.hrv && x.rhr) p.push('FC repos ' + Math.round(x.rhr) + ' bpm');
+    if(inc.hrv && x.hrv) p.push('VFC ' + Math.round(x.hrv) + ' ms');
+    if(inc.steps && sm[iso]) p.push(nFr(sm[iso]) + ' pas');
+    if(p.length) wl.push('- ' + dFr(d) + ' : ' + p.join(' · '));
+  }
+  if(inc.sleep || inc.hrv || inc.steps){ L.push('', 'BIEN-ÊTRE (14 derniers jours) :'); if(wl.length) L.push(...wl); else L.push('(aucune donnée)'); }
+
+  if(inc.muscu){
+    const j = buildJournal(workouts).slice(0, 10);
+    if(j.length){ L.push('', 'MUSCULATION (charges) :'); j.forEach(ex => L.push('- ' + ex.name + ' : dernière ' + topStr(ex, ex.last) + ' (' + dFr(parse(ex.last.date)) + '), record ' + (ex.weighted ? fmtKg(ex.best) : ex.best + ' reps'))); }
+  }
+  return { text: L.join('\n'), refs };
+}
+
+const COACH_SCHEMA = { type: 'OBJECT', properties: { reply: { type: 'STRING' }, actions: { type: 'ARRAY', items: { type: 'OBJECT', properties: { type: { type: 'STRING', enum: ['adjust', 'move', 'delete'] }, ref: { type: 'STRING' }, durMin: { type: 'INTEGER' }, paceDeltaSec: { type: 'INTEGER' }, newDate: { type: 'STRING' }, why: { type: 'STRING' } }, required: ['type', 'ref', 'why'] } } }, required: ['reply'] };
+async function geminiCall(key, model, body){
+  let res;
+  try{ res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify(body) }); }
+  catch(e){ throw { code: 'net' }; }
+  let j = null; try{ j = await res.json(); }catch(e){ /* corps vide */ }
+  if(!res.ok){
+    const msg = (j && j.error && j.error.message) || '', st = res.status;
+    if(st === 429) throw { code: 'quota' };
+    if(st === 401 || st === 403 || /API key not valid|API_KEY_INVALID/i.test(msg)) throw { code: 'auth' };
+    if(st === 404) throw { code: 'model' };
+    if(st === 400) throw { code: 'bad', msg };
+    if(st >= 500) throw { code: 'busy' };
+    throw { code: 'http', status: st };
+  }
+  return j;
+}
+function parseCoachReply(text){
+  const t = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/```$/, '').trim();
+  try{ const o = JSON.parse(t); if(o && typeof o.reply === 'string') return { reply: o.reply, actions: Array.isArray(o.actions) ? o.actions : [] }; }catch(e){ /* texte libre */ }
+  return { reply: String(text).trim(), actions: [] };
+}
+async function geminiChat({ key, model, system, history }){
+  const base = { systemInstruction: { parts: [{ text: system }] }, contents: history.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] })) };
+  const gc = { temperature: 0.5, maxOutputTokens: 2048 };
+  const variants = [{ ...gc, responseMimeType: 'application/json', responseSchema: COACH_SCHEMA, thinkingConfig: { thinkingBudget: 0 } }, { ...gc, responseMimeType: 'application/json', responseSchema: COACH_SCHEMA }, { ...gc, responseMimeType: 'application/json' }, gc];
+  let j = null, last = null;
+  for(const v of variants){
+    try{ j = await geminiCall(key, model, { ...base, generationConfig: v }); break; }
+    catch(e){ last = e; if(!(e && e.code === 'bad')) throw e; }
+  }
+  if(!j) throw last;
+  const cand = j.candidates && j.candidates[0];
+  const text = cand && cand.content && cand.content.parts ? cand.content.parts.map(p => p.text || '').join('') : '';
+  if(!text.trim()) throw { code: j.promptFeedback && j.promptFeedback.blockReason ? 'blocked' : 'empty' };
+  return parseCoachReply(text);
+}
+const coachError = (e) => {
+  const c = e && e.code;
+  return c === 'auth' ? 'Clé Gemini refusée. Vérifie-la dans les réglages du coach.'
+    : c === 'quota' ? 'Quota gratuit atteint pour le moment (limite par minute ou par jour). Réessaie un peu plus tard.'
+    : c === 'model' ? 'Modèle introuvable. Change de modèle dans les réglages du coach.'
+    : c === 'net' ? 'Impossible de joindre Gemini. Vérifie ta connexion.'
+    : c === 'busy' ? 'Le service Gemini est surchargé. Réessaie dans un instant.'
+    : c === 'blocked' ? 'Gemini a refusé de répondre à cette demande. Reformule-la.'
+    : c === 'empty' ? 'Réponse vide. Réessaie.'
+    : 'Le coach n\'a pas pu répondre. Réessaie.';
+};
+
+function resolveActions(raw, refs, ctx){
+  const out = [];
+  (Array.isArray(raw) ? raw : []).slice(0, 3).forEach(a => {
+    const r = a && refs[a.ref];
+    if(!r) return;
+    let wIdx = -1, s = null;
+    ctx.program.forEach((w, i) => w.sessions.forEach(x => { if(x.id === r.sid){ wIdx = i; s = x; } }));
+    if(!s) return;
+    const d = addDays(ctx.base, wIdx * 7 + s.day);
+    const name = (s.templateId && (ctx.templates.find(t => t.id === s.templateId) || {}).name) || (DISC[s.discipline] || DISC.autre).short;
+    const act = { id: uid(), type: a.type, sid: s.id, label: dFr(d) + ' · ' + name, why: String(a.why || '').slice(0, 220), status: 'pending' };
+    if(a.type === 'adjust'){
+      const parts = [], dm = Math.round(Number(a.durMin)), pd = Math.round(Number(a.paceDeltaSec)), cur = parseTargetMinutes(s.target);
+      if(dm >= 5 && dm <= 300 && cur && dm !== cur){ act.durMin = dm; parts.push('Durée : ' + dur(cur) + ' → ' + dur(dm)); }
+      if(pd && Math.abs(pd) <= 60 && hasPace(s.desc)){ act.paceDelta = pd; parts.push('Allure : ' + (pd > 0 ? '+' : '−') + Math.abs(pd) + ' s'); }
+      if(!parts.length) return;
+      act.summary = parts.join(' · ');
+    }else if(a.type === 'move'){
+      const nd = String(a.newDate || '');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(nd) || nd < ctx.todayStr || nd > fmt(addDays(parse(ctx.todayStr), 60))) return;
+      act.newDate = nd; act.summary = 'Déplacer au ' + longDate(parse(nd));
+    }else if(a.type === 'delete'){
+      act.summary = 'Supprimer cette séance';
+    }else return;
+    out.push(act);
+  });
+  return out;
+}
+
+const inlineFmt = (t) => String(t).split(/(\*\*[^*]+\*\*)/g).map((p, i) => /^\*\*[^*]+\*\*$/.test(p) ? <b key={i}>{p.slice(2, -2)}</b> : p);
+function CoachFmt({ text }){
+  return String(text).split(/\n{2,}/).map((b, i) => {
+    const lines = b.split('\n');
+    if(lines.every(l => /^\s*[-•*]\s+/.test(l))) return <ul key={i}>{lines.map((l, j) => <li key={j}>{inlineFmt(l.replace(/^\s*[-•*]\s+/, ''))}</li>)}</ul>;
+    return <p key={i}>{lines.map((l, j) => <React.Fragment key={j}>{j > 0 && <br />}{inlineFmt(l)}</React.Fragment>)}</p>;
+  });
+}
+
+function CoachSettings({ coach, setCoach, keyVal, onClearKey, onClear, onClose }){
+  const [models, setModels] = useState([]);
+  const [msg, setMsg] = useState('');
+  const set = (k, v) => setCoach(c => ({ ...c, [k]: v }));
+  const tog = (k) => setCoach(c => ({ ...c, inc: { ...c.inc, [k]: !c.inc[k] } }));
+  const test = async () => {
+    setMsg('Test en cours…');
+    try{
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100', { headers: { 'x-goog-api-key': keyVal } });
+      if([400, 401, 403].includes(res.status)){ setMsg('Clé refusée par Google.'); return; }
+      if(!res.ok){ setMsg('Test impossible (erreur ' + res.status + ').'); return; }
+      const j = await res.json();
+      const ms = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent') && /flash/i.test(m.name)).map(m => m.name.replace(/^models\//, ''));
+      setModels(ms); setMsg('Clé valide ✓ · ' + ms.length + ' modèles Flash disponibles.');
+    }catch(e){ setMsg('Connexion impossible.'); }
+  };
+  const rows = [['sleep', 'Sommeil'], ['hrv', 'VFC et FC au repos'], ['steps', 'Pas'], ['muscu', 'Charges de musculation']];
+  return (
+    <Sheet title="Réglages du coach" onClose={onClose}>
+      <label className="f" htmlFor="co-goal">Mon objectif (facultatif)</label>
+      <input id="co-goal" placeholder="ex. 10 km en moins de 50 min" value={coach.goal} onChange={(e) => set('goal', e.target.value)} />
+      <label className="f" htmlFor="co-model">Modèle Gemini</label>
+      <input id="co-model" list="co-models" autoCapitalize="off" autoCorrect="off" spellCheck="false" value={coach.model} onChange={(e) => set('model', e.target.value.trim())} />
+      <datalist id="co-models">{models.map(m => <option key={m} value={m} />)}</datalist>
+      <div className="actions" style={{ marginTop: 10 }}><button className="btn ghost" style={{ height: 42 }} onClick={test}>Tester la clé</button></div>
+      {msg && <p className="note" role="status" style={{ marginTop: 8 }}>{msg}</p>}
+      <h3 className="subh">Données envoyées au coach</h3>
+      <p className="note">Le plan, tes séances et tes zones de FC sont toujours envoyés. Tu peux exclure :</p>
+      {rows.map(([k, l]) => <label key={k} className="checkrow"><input type="checkbox" checked={!!coach.inc[k]} onChange={() => tog(k)} /> {l}</label>)}
+      <p className="note" style={{ marginTop: 12 }}>Ni ta clé, ni ton nom ne sont envoyés. Avec une clé gratuite, les conditions de Google s'appliquent : vérifie-les à la création de ta clé.</p>
+      <div className="actions" style={{ marginTop: 16 }}>
+        <button className="btn ghost" onClick={() => { if(confirm('Effacer toute la conversation ?')){ onClear(); onClose(); } }}>Effacer la conversation</button>
+        <button className="btn ghost" onClick={() => { if(confirm('Supprimer la clé Gemini de ce téléphone ?')){ onClearKey(); onClose(); } }}>Changer la clé</button>
+      </div>
+    </Sheet>
+  );
+}
+
+const COACH_SUGGESTIONS = ['Résume ma semaine', 'Comment est ma récupération ?', 'Ma charge de la semaine est-elle bien répartie ?', 'Que dois-je faire demain ?'];
+function CoachPage({ program, profile, workouts, icu, icuConn, steps, templates, matches, todayStr, onApply, onSettings }){
+  const [coach, setCoach] = useState(loadCoach);
+  const [key, setKey] = useState(() => lsGet(COACH_KEY) || '');
+  const [keyIn, setKeyIn] = useState('');
+  const [keyMsg, setKeyMsg] = useState('');
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [cfg, setCfg] = useState(false);
+  const endRef = useRef(null), ta = useRef(null);
+  useEffect(() => { saveCoach(coach); }, [coach]);
+  useEffect(() => { if(endRef.current && coach.messages.length) endRef.current.scrollIntoView({ block: 'end' }); }, [coach.messages.length, busy, err]);
+
+  const saveKey = () => { const k = keyIn.trim(); if(k.length < 20){ setKeyMsg('Colle la clé complète (une longue suite de caractères).'); return; } lsSet(COACH_KEY, k); setKey(k); setKeyIn(''); setKeyMsg(''); };
+  const setAct = (mid, aid, patch) => setCoach(c => ({ ...c, messages: c.messages.map(m => m.id !== mid ? m : { ...m, actions: (m.actions || []).map(a => a.id !== aid ? a : { ...a, ...patch }) }) }));
+  const apply = (m, a) => { const r = onApply(a); setAct(m.id, a.id, r.ok ? { status: 'done' } : { status: 'failed', error: r.msg }); };
+
+  const send = async (text) => {
+    const q = String(text || '').trim();
+    if(!q || busy) return;
+    const um = { id: uid(), role: 'user', text: q, ts: Date.now() };
+    const hist = [...coach.messages, um].slice(-10);
+    while(hist.length && hist[0].role !== 'user') hist.shift();
+    setCoach(c => ({ ...c, messages: [...c.messages, um] })); setInput(''); setBusy(true); setErr('');
+    try{
+      const { text: ctx, refs } = buildCoachContext({ program, profile, workouts, icu, icuConn, steps, templates, matches, todayStr, coach });
+      const out = await geminiChat({ key, model: coach.model, system: COACH_SYSTEM + '\n\n' + ctx, history: hist });
+      const actions = resolveActions(out.actions, refs, { program, base: startOfWeek(parse(profile.programStart)), templates, todayStr });
+      setCoach(c => ({ ...c, messages: [...c.messages, { id: uid(), role: 'model', text: out.reply, actions, ts: Date.now() }] }));
+    }catch(e){ setErr(coachError(e)); }
+    setBusy(false);
+  };
+
+  if(!key) return (
+    <div>
+      <Header title="Coach" onSettings={onSettings} />
+      <div className="card" style={{ marginTop: 18 }}>
+        <h3>Connecter Gemini</h3>
+        <p className="note">Le coach utilise l'IA gratuite de Google (Gemini). Crée une clé sur Google AI Studio (bouton « Create API key »), puis colle-la ici. Elle reste sur ton téléphone.</p>
+        <p className="note" style={{ marginTop: 8 }}><a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Ouvrir Google AI Studio</a></p>
+        <p className="note" style={{ marginTop: 8 }}>Le coach reçoit ton plan, tes séances, tes zones de FC et, si tu le souhaites, ton sommeil, ta VFC et tes pas. Ses conseils ne remplacent pas un avis médical.</p>
+        <label className="f" htmlFor="gem-key">Clé API Gemini</label>
+        <input id="gem-key" type="password" autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck="false" value={keyIn} onChange={(e) => { setKeyIn(e.target.value); setKeyMsg(''); }} />
+        {keyMsg && <p className="err" role="alert">{keyMsg}</p>}
+        <div className="actions"><button className="btn" onClick={saveKey}>Enregistrer la clé</button></div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <Header title="Coach" sub="Pose tes questions sur ton entraînement" onSettings={onSettings} />
+      <div className="coachtools"><button onClick={() => setCfg(true)}>Réglages du coach</button></div>
+      <div className="chat" aria-live="polite">
+        {coach.messages.length === 0 && (
+          <div>
+            <p className="coachintro">Je connais ton plan, tes dernières séances et tes zones de FC. Pose-moi une question, ou essaie :</p>
+            <div className="coachsug">{COACH_SUGGESTIONS.map(s => <button key={s} onClick={() => send(s)}>{s}</button>)}</div>
+            <p className="coachintro" style={{ marginTop: 14, fontSize: 13.5 }}>Les conseils du coach ne remplacent pas un avis médical.</p>
+          </div>
+        )}
+        {coach.messages.map(m => (
+          <React.Fragment key={m.id}>
+            <div className={'msg ' + (m.role === 'user' ? 'user' : 'model')}>{m.role === 'user' ? m.text : <CoachFmt text={m.text} />}</div>
+            {(m.actions || []).map(a => (
+              <div key={a.id} className={'proposal' + (a.status !== 'pending' ? ' done' : '')}>
+                <b>{a.label}</b>
+                <p className="sum">{a.summary}</p>
+                {a.why && <p className="why">{a.why}</p>}
+                {a.status === 'pending' && <div className="btns"><button className="ok" onClick={() => apply(m, a)}>Appliquer</button><button className="no" onClick={() => setAct(m.id, a.id, { status: 'ignored' })}>Ignorer</button></div>}
+                {a.status === 'done' && <p className="why">Appliqué ✓</p>}
+                {a.status === 'ignored' && <p className="why">Ignoré</p>}
+                {a.status === 'failed' && <p className="why">Impossible : {a.error}</p>}
+              </div>
+            ))}
+          </React.Fragment>
+        ))}
+        {busy && <div className="msg model typing">Le coach réfléchit…</div>}
+        {err && <p className="err" role="alert">{err}</p>}
+        <div ref={endRef} />
+      </div>
+      <div className="composer"><div className="in">
+        <textarea ref={ta} rows={1} placeholder="Ta question…" aria-label="Ta question pour le coach" value={input}
+                  onChange={(e) => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(120, e.target.scrollHeight) + 'px'; }}
+                  onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)){ e.preventDefault(); send(input); } }} />
+        <button className="send" aria-label="Envoyer" disabled={busy || !input.trim()} onClick={() => { send(input); if(ta.current) ta.current.style.height = 'auto'; }}><Icon name="send" size={20} sw={2.2} /></button>
+      </div></div>
+      {cfg && <CoachSettings coach={coach} setCoach={setCoach} keyVal={key} onClearKey={() => { lsSet(COACH_KEY, ''); setKey(''); }} onClear={() => setCoach(c => ({ ...c, messages: [] }))} onClose={() => setCfg(false)} />}
+    </div>
+  );
+}
+
 function Dash({ icu, todayStr }){
   const D = useMemo(() => buildDash(icu, todayStr), [icu, todayStr]);
   const [detail, setDetail] = useState(null);
@@ -1710,7 +2008,7 @@ function Calendar({ program, profile, todayStr, templates, matches, onToggle, on
 }
 
 /* ---------- Historique ---------- */
-function History({ workouts, onDelete, onSettings }){
+function History({ workouts, onDelete, onSettings, onBack }){
   const [open, setOpen] = useState(null);
   const sorted = useMemo(()=> [...workouts].sort((a,b)=> b.date.localeCompare(a.date)), [workouts]);
   const groups = [];
@@ -1722,6 +2020,7 @@ function History({ workouts, onDelete, onSettings }){
   });
   return (
     <div>
+      <button className="back" onClick={onBack}><Icon name="back" size={20} /> Retour</button>
       <Header title="Historique" sub={workouts.length ? workouts.length + (workouts.length>1 ? ' séances' : ' séance') : null} onSettings={onSettings} />
       {workouts.length === 0 && <p className="empty">Aucune séance pour le moment. Coche une séance du plan ou ajoute-en une avec le bouton +.</p>}
       {groups.map(g => {
@@ -2075,7 +2374,7 @@ function FinishSheet({ title, date, onSave, onClose }){
 }
 
 /* ---------- Réglages ---------- */
-function Settings({ profile, setProfile, onBack, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
+function Settings({ profile, setProfile, onBack, onOpenHistory, onReset, onLoadPlan, onShiftPlan, getData, onImport, icuConn, icu, onConnectIcu, onDisconnectIcu, onRefreshIcu }){
   const [f, setF] = useState(profile);
   const [saved, setSaved] = useState(false);
   const [adjMsg, setAdjMsg] = useState('');
@@ -2116,6 +2415,12 @@ function Settings({ profile, setProfile, onBack, onReset, onLoadPlan, onShiftPla
       <Header title="Réglages" />
 
       <IcuSettings conn={icuConn} icu={icu} onConnect={onConnectIcu} onDisconnect={onDisconnectIcu} onRefresh={onRefreshIcu} />
+
+      <div className="card">
+        <h3>Historique des séances</h3>
+        <p className="note">Retrouve toutes les séances que tu as enregistrées : durée, FC, strain Whoop, exercices.</p>
+        <div className="actions"><button className="btn ghost" onClick={onOpenHistory}>Ouvrir l'historique</button></div>
+      </div>
 
       <div className="card">
         <h3>Plan</h3>
@@ -2281,7 +2586,7 @@ function App(){
     }
     setWorkouts([...next, entry]);
     setSheet(null); setMuscuView(null);
-    go(from ? 'today' : 'history');
+    go(from ? 'today' : 'muscu');
   };
 
   const toggleSession = (wIdx, sid) => {
@@ -2343,6 +2648,21 @@ function App(){
     setSheet(null);
   };
 
+  // applique une proposition validée dans le coach ; vérifie que la séance existe toujours et n'est pas déjà faite
+  const coachApply = (act) => {
+    let wIdx = -1, s = null;
+    program.forEach((w, i) => w.sessions.forEach(x => { if(x.id === act.sid){ wIdx = i; s = x; } }));
+    if(!s || s.done || matches[s.id]) return { ok: false, msg: 'cette séance a changé ou est déjà faite.' };
+    const date = fmt(addDays(weekStartFor(wIdx), s.day));
+    if(act.type === 'delete'){ setProgram(program.map((w, i) => i !== wIdx ? w : { ...w, sessions: w.sessions.filter(x => x.id !== s.id) })); setWorkouts(workouts.filter(w => w.sessionId !== s.id)); return { ok: true }; }
+    if(act.type === 'move'){ placeSession(wIdx, s.id, act.newDate, {}); return { ok: true }; }
+    let desc = s.desc, target = s.target;
+    if(act.paceDelta) desc = shiftPaces(desc, act.paceDelta);
+    if(act.durMin) target = setLeadingDuration(target, act.durMin);
+    placeSession(wIdx, s.id, date, { desc, target });
+    return { ok: true };
+  };
+
   const reset = () => {
     try{ localStorage.removeItem(KEY); }catch(e){}
     const tpls = defaultTemplates();
@@ -2374,7 +2694,7 @@ function App(){
     { id:'plan', label:'Calendrier', icon:'plan' },
     { id:'muscu', label:'Musculation', icon:'muscu' },
     { id:'map', label:'Carte', icon:'map' },
-    { id:'history', label:'Historique', icon:'history' },
+    { id:'coach', label:'Coach', icon:'coach' },
   ];
   const onSettingsPage = page === 'settings';
   const inMuscuDetail = page === 'muscu' && !!muscuView;
@@ -2397,8 +2717,9 @@ function App(){
                   onFinish={()=>setSheet({ type:'finish', templateId:t.id, from:muscuView.from })} />;
         })()}
         {page==='map' && <MapPage icu={icu} conn={icuConn} todayStr={todayStr} onSettings={openSettings} />}
-        {page==='history' && <History workouts={workouts} onDelete={deleteWorkout} onSettings={openSettings} />}
-        {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onReset={reset} onLoadPlan={loadPlan} onShiftPlan={shiftPlan}
+        {page==='coach' && <CoachPage program={program} profile={profile} workouts={workouts} icu={icu} icuConn={icuConn} steps={steps} templates={templates} matches={matches} todayStr={todayStr} onApply={coachApply} onSettings={openSettings} />}
+        {page==='history' && <History workouts={workouts} onDelete={deleteWorkout} onSettings={openSettings} onBack={()=>go('settings')} />}
+        {page==='settings' && <Settings profile={profile} setProfile={setProfile} onBack={()=>go(prevPage)} onOpenHistory={()=>go('history')} onReset={reset} onLoadPlan={loadPlan} onShiftPlan={shiftPlan}
             getData={()=>({ workouts, program, profile, templates, steps })} onImport={importData}
             icuConn={icuConn} icu={icu} onConnectIcu={connectIcu} onDisconnectIcu={disconnectIcu} onRefreshIcu={()=>refreshIcu()} />}
       </main>
