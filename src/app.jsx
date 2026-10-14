@@ -1309,6 +1309,9 @@ const loadCoach = () => {
   }catch(e){ return { ...COACH_DEFAULTS, inc: { ...COACH_DEFAULTS.inc }, messages: [] }; }
 };
 const saveCoach = (c) => lsSet(COACH_STORE, JSON.stringify({ ...c, messages: c.messages.slice(-40) }));
+/* La conversation repart de zéro à chaque lancement de l'app (choix d'Alexandre, octobre 2026).
+   Elle reste en place quand on change d'onglet pendant la même session ; seuls les messages sont vidés, jamais la clé ni les réglages. */
+try{ const c0 = loadCoach(); if(c0.messages.length) saveCoach({ ...c0, messages: [] }); }catch(e){}
 const dFr = (d) => DAYS_ABBR[(d.getDay() + 6) % 7].toLowerCase() + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
 
 const COACH_SYSTEM = `Tu es le coach d'entraînement intégré à l'application Allure (course à pied, vélo, natation, musculation). Tu parles à son utilisateur, en français, en le tutoyant.

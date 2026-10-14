@@ -1512,6 +1512,12 @@ const loadCoach = () => {
     }
 };
 const saveCoach = (c) => lsSet(COACH_STORE, JSON.stringify({ ...c, messages: c.messages.slice(-40) }));
+try {
+    const c0 = loadCoach();
+    if (c0.messages.length)
+        saveCoach({ ...c0, messages: [] });
+}
+catch (e) { }
 const dFr = (d) => DAYS_ABBR[(d.getDay() + 6) % 7].toLowerCase() + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()];
 const COACH_SYSTEM = `Tu es le coach d'entraînement intégré à l'application Allure (course à pied, vélo, natation, musculation). Tu parles à son utilisateur, en français, en le tutoyant.
 Règles :
